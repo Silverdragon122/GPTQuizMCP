@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "quiz-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-10",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "AUTH_MODE": "none",
+    "PUBLIC_BASE_URL": "",
+    "WIDGET_DOMAIN": ""
+  }
+}
