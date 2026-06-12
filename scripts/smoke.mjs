@@ -104,6 +104,7 @@ async function checkNoAuthHttpSurface() {
 
   const widget = await fetchHttp("/widget/quiz.html", { raw: true });
   assert(widget.response.ok, `/widget/quiz.html should be public in no-auth mode, got HTTP ${widget.response.status}.`);
+  assert(widget.response.headers.get("cache-control") === "no-store", "Widget route must not cache stale UI after deploys.");
   const csp = widget.response.headers.get("content-security-policy") || "";
   assert(csp.includes("default-src 'none'"), "Widget route CSP must default to no sources.");
   assert(csp.includes("connect-src 'none'"), "Widget route CSP must forbid outbound connections.");

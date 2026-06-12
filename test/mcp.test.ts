@@ -184,6 +184,7 @@ describe("mcp endpoint", () => {
     expect(csp).toContain("default-src 'none'");
     expect(csp).toContain("connect-src 'none'");
     expect(csp).toContain("frame-ancestors https://chatgpt.com https://chat.openai.com");
+    expect(getResponse.headers.get("cache-control")).toBe("no-store");
   });
 
   it("does not serve public HTML pages from root or preview routes", async () => {

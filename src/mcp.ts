@@ -159,7 +159,7 @@ export async function handleRequest(request: Request, env: Env = {}): Promise<Re
       headers: {
         ...SECURITY_HEADERS,
         "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "public, max-age=300",
+        "Cache-Control": "no-store",
         "Content-Security-Policy":
           "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors https://chatgpt.com https://chat.openai.com"
       }
