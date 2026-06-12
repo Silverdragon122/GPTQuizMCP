@@ -101,6 +101,31 @@ class TestStorage {
 }
 
 describe("quiz widget hydration", () => {
+  it("embeds a pinned local KaTeX runtime without remote resources", () => {
+    expect(QUIZ_WIDGET_HTML.startsWith("<!doctype html>")).toBe(true);
+    expect(QUIZ_WIDGET_HTML).toContain('data-quiz-vendor="katex"');
+    expect(QUIZ_WIDGET_HTML).toContain('data-version="0.17.0"');
+    expect(QUIZ_WIDGET_HTML).toContain("renderToString");
+    expect(QUIZ_WIDGET_HTML).not.toContain("cdn.jsdelivr");
+    expect(QUIZ_WIDGET_HTML).not.toContain("unpkg.com");
+  });
+
+  it("uses transform-based progress and loading motion without a visible reset", () => {
+    const style = extractWidgetStyle();
+    const progressRule = extractCssRule(style, ".progress-fill");
+    const loadingRule = extractCssRule(style, ".loading-bar::before");
+
+    expect(progressRule).toContain("width: 100%;");
+    expect(progressRule).toContain("transform: scaleX(var(--progress-scale, 0));");
+    expect(progressRule).toContain("transition: transform 220ms");
+    expect(progressRule).not.toContain("width 220ms");
+    expect(loadingRule).toContain("width: 46%;");
+    expect(loadingRule).toContain("transform: translateX(-125%);");
+    expect(style).toContain("transform: translateX(320%);");
+    expect(style).not.toContain("background-position:");
+    expect(QUIZ_WIDGET_HTML).toContain('setProperty("--progress-scale"');
+  });
+
   it("hydrates from mcp_tool_result metadata when toolOutput is empty", () => {
     const toolResult = makeToolResult("Metadata quiz", "quiz_metadata");
     const { openai, root } = mountWidget({
@@ -198,6 +223,24 @@ describe("quiz widget hydration", () => {
     });
     expect(root.textContent).toContain("Late globals quiz");
     expect(root.textContent).not.toContain("Waiting for quiz data");
+  });
+
+  it("does not call host widget-state persistence unless explicitly enabled", () => {
+    const toolResult = makeToolResult("No host persistence quiz", "quiz_no_host_persist");
+    const { openai, root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta }
+      },
+      { persistWidgetState: false }
+    );
+
+    expect(root.textContent).toContain("No host persistence quiz");
+    expect(openai.widgetState).toBeNull();
+
+    findButtonContainingText(root, "Correct")!.click();
+    expect(root.textContent).toContain("Correct");
+    expect(openai.widgetState).toBeNull();
   });
 
   it("requires submit for multi-correct questions and scores the exact selected set", () => {
@@ -407,6 +450,69 @@ describe("quiz widget hydration", () => {
     expect(root.textContent).toContain("Reviewing missed answers.");
   });
 
+  it("asks ChatGPT to use standard LaTeX for answered-question explanations", () => {
+    const messages: any[] = [];
+    const toolResult = makeToolResult("LaTeX explain quiz", "quiz_latex_explain");
+    const { root } = mountWidget({
+      toolOutput: toolResult.structuredContent,
+      toolResponseMetadata: { _meta: toolResult._meta },
+      sendFollowUpMessage(message: unknown) {
+        messages.push(message);
+      }
+    });
+
+    findButtonContainingText(root, "Correct")!.click();
+    findButtonByText(root, "Explain this")!.click();
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].prompt).toContain("standard LaTeX notation");
+    expect(messages[0].prompt).toContain("$...$");
+    expect(messages[0].prompt).toContain("$$...$$");
+  });
+
+  it("asks ChatGPT to use standard LaTeX for result reviews", () => {
+    const messages: any[] = [];
+    const toolResult = makeToolResult("LaTeX review quiz", "quiz_latex_review");
+    const { root } = mountWidget({
+      toolOutput: toolResult.structuredContent,
+      toolResponseMetadata: { _meta: toolResult._meta },
+      sendFollowUpMessage(message: unknown) {
+        messages.push(message);
+      }
+    });
+
+    findButtonContainingText(root, "Correct")!.click();
+    findButtonByText(root, "Show score")!.click();
+    findButtonByText(root, "Review with GPT")!.click();
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].prompt).toContain("standard LaTeX notation");
+    expect(messages[0].prompt).toContain("$...$");
+    expect(messages[0].prompt).toContain("$$...$$");
+  });
+
+  it("asks ChatGPT to use standard LaTeX for study-mode explanations", () => {
+    const messages: any[] = [];
+    const toolResult = makeToolResult("LaTeX study quiz", "quiz_latex_study");
+    const { root } = mountWidget({
+      toolOutput: toolResult.structuredContent,
+      toolResponseMetadata: { _meta: toolResult._meta },
+      sendFollowUpMessage(message: unknown) {
+        messages.push(message);
+      }
+    });
+
+    findButtonContainingText(root, "Correct")!.click();
+    findButtonByText(root, "Show score")!.click();
+    findButtonByText(root, "Learn")!.click();
+    findButtonByText(root, "Explain this")!.click();
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].prompt).toContain("standard LaTeX notation");
+    expect(messages[0].prompt).toContain("$...$");
+    expect(messages[0].prompt).toContain("$$...$$");
+  });
+
   it("uses full-width compact answer layout for very long choices", () => {
     const longChoice =
       "Swahili Coast culture, Islamization in conquered regions, Columbian Exchange foodways, and Renaissance blending of classical and Christian ideas.";
@@ -429,7 +535,7 @@ describe("quiz widget hydration", () => {
   });
 });
 
-function mountWidget(openai: Record<string, unknown>, options: { localStorage?: TestStorage } = {}) {
+function mountWidget(openai: Record<string, unknown>, options: { localStorage?: TestStorage; persistWidgetState?: boolean } = {}) {
   const root = new TestElement("div");
   const windowListeners: Record<string, Array<(event: any) => void>> = {};
   const documentShim = {
@@ -451,6 +557,7 @@ function mountWidget(openai: Record<string, unknown>, options: { localStorage?: 
   const windowShim: Record<string, unknown> = {
     openai: openaiShim,
     parent: {},
+    __QUIZ_ENABLE_WIDGET_STATE__: options.persistWidgetState !== false,
     __QUIZ_PREVIEW__: null,
     __QUIZ_PREVIEW_META__: {},
     localStorage: options.localStorage,

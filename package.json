@@ -7,6 +7,7 @@
     "dev": "wrangler dev --local --port 8787",
     "deploy": "wrangler deploy --minify",
     "deploy:interactive": "node scripts/deploy.mjs",
+    "vendor:katex": "node scripts/vendor-katex.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs"
