@@ -13,6 +13,7 @@ export type Env = {
   ADMIN_BEARER_TOKEN?: string;
   AUTH_MODE?: string;
   OAUTH_AUTHORIZATION_SERVERS?: string;
+  OAUTH_ACCEPT_RESOURCE_CLAIM?: string;
   OAUTH_AUDIENCE?: string;
   OAUTH_ISSUER?: string;
   OAUTH_JWKS_URL?: string;
@@ -32,7 +33,7 @@ type JsonRpcRequest = {
   params?: unknown;
 };
 
-type AuthMode = "none" | "admin_token" | "oauth";
+type AuthMode = "none" | "admin_token" | "oauth" | "invalid";
 
 type AuthContext = {
   challenge?: string;
@@ -51,8 +52,13 @@ const APP_NAME = "quiz-mcp";
 const APP_VERSION = "0.1.0";
 const LATEST_PROTOCOL_VERSION = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]);
-const TEMPLATE_URI = "ui://widget/inline-quiz-v3.html";
-const LEGACY_TEMPLATE_URIS = new Set(["ui://widget/inline-quiz-v1.html", "ui://widget/inline-quiz-v2.html"]);
+const TEMPLATE_URI = "ui://widget/inline-quiz-v5.html";
+const LEGACY_TEMPLATE_URIS = new Set([
+  "ui://widget/inline-quiz-v1.html",
+  "ui://widget/inline-quiz-v2.html",
+  "ui://widget/inline-quiz-v3.html",
+  "ui://widget/inline-quiz-v4.html"
+]);
 const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 const TOOL_NAME = "render_inline_quiz";
 const MAX_REQUEST_BYTES = 1_250_000;
@@ -61,6 +67,8 @@ const MAX_BEARER_TOKEN_CHARS = 8192;
 const MAX_JWT_PART_CHARS = 16_384;
 const MAX_JWKS_BYTES = 200_000;
 const MAX_JWKS_KEYS = 20;
+const MAX_JWK_MODULUS_CHARS = 8192;
+const MAX_JWK_EXPONENT_CHARS = 16;
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8"
 };
@@ -70,27 +78,18 @@ const SECURITY_HEADERS = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 };
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers":
     "Accept, Authorization, Content-Type, Mcp-Protocol-Version, Mcp-Session-Id, OpenAI-Conversation-ID",
   "Access-Control-Expose-Headers": "Mcp-Protocol-Version, Mcp-Session-Id"
 };
+const TRUSTED_CORS_ORIGINS = new Set(["https://chatgpt.com", "https://chat.openai.com"]);
 
 const noAuthSecuritySchemes = [{ type: "noauth" }];
 const DEFAULT_OAUTH_SCOPE = "quiz:render";
 const AUTH_PUBLIC_PATHS = new Set([
   "/.well-known/oauth-protected-resource",
   "/.well-known/oauth-protected-resource/mcp"
-]);
-const MCP_DISCOVERY_METHODS = new Set([
-  "initialize",
-  "notifications/initialized",
-  "ping",
-  "tools/list",
-  "resources/list",
-  "resources/templates/list",
-  "resources/read"
 ]);
 let jwksCache: JwksCacheEntry | null = null;
 
@@ -106,26 +105,33 @@ export async function handleRequest(request: Request, env: Env = {}): Promise<Re
   const authMode = getAuthMode(env);
 
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: responseHeaders() });
+    return new Response(null, {
+      status: isCorsAllowed(request, env) ? 204 : 403,
+      headers: responseHeaders({}, request, env)
+    });
+  }
+
+  if (authMode === "invalid") {
+    return jsonResponse({ error: "Not found" }, { status: 404 }, request, env);
   }
 
   if (AUTH_PUBLIC_PATHS.has(url.pathname)) {
-    const methodError = requireMethod(request, ["GET", "HEAD"]);
-    if (methodError) return methodError;
-
     if (authMode !== "oauth") {
-      return jsonResponse({ error: "Not found" }, { status: 404 });
+      return jsonResponse({ error: "Not found" }, { status: 404 }, request, env);
     }
 
-    return jsonResponse(request.method === "HEAD" ? null : protectedResourceMetadata(request, env));
+    const methodError = requireMethod(request, ["GET", "HEAD"], env);
+    if (methodError) return methodError;
+
+    return jsonResponse(request.method === "HEAD" ? null : protectedResourceMetadata(request, env), {}, request, env);
   }
 
   if (authMode === "admin_token" && !isAdminAuthorized(request, env)) {
-    return jsonResponse({ error: "Not found" }, { status: 404 });
+    return jsonResponse({ error: "Not found" }, { status: 404 }, request, env);
   }
 
   if (authMode === "oauth" && url.pathname !== "/mcp" && !(await authenticateRequest(request, env)).ok) {
-    return jsonResponse({ error: "Not found" }, { status: 404 });
+    return jsonResponse({ error: "Not found" }, { status: 404 }, request, env);
   }
 
   if (url.pathname === "/mcp") {
@@ -133,7 +139,7 @@ export async function handleRequest(request: Request, env: Env = {}): Promise<Re
   }
 
   if (url.pathname === "/healthz") {
-    const methodError = requireMethod(request, ["GET", "HEAD"]);
+    const methodError = requireMethod(request, ["GET", "HEAD"], env);
     if (methodError) return methodError;
 
     return jsonResponse({
@@ -142,11 +148,11 @@ export async function handleRequest(request: Request, env: Env = {}): Promise<Re
       version: APP_VERSION,
       mcp: "/mcp",
       widget: TEMPLATE_URI
-    });
+    }, {}, request, env);
   }
 
   if (url.pathname === "/widget/quiz.html") {
-    const methodError = requireMethod(request, ["GET", "HEAD"]);
+    const methodError = requireMethod(request, ["GET", "HEAD"], env);
     if (methodError) return methodError;
 
     return new Response(request.method === "HEAD" ? null : QUIZ_WIDGET_HTML, {
@@ -160,10 +166,14 @@ export async function handleRequest(request: Request, env: Env = {}): Promise<Re
     });
   }
 
-  return jsonResponse({ error: "Not found" }, { status: 404 });
+  return jsonResponse({ error: "Not found" }, { status: 404 }, request, env);
 }
 
 export async function handleMcp(request: Request, env: Env = {}): Promise<Response> {
+  if (getAuthMode(env) === "invalid") {
+    return jsonResponse({ error: "Not found" }, { status: 404 }, request, env);
+  }
+
   if (request.method !== "POST") {
     return jsonResponse(
       {
@@ -177,7 +187,9 @@ export async function handleMcp(request: Request, env: Env = {}): Promise<Respon
       {
         status: 405,
         headers: { Allow: "POST, OPTIONS" }
-      }
+      },
+      request,
+      env
     );
   }
 
@@ -185,14 +197,14 @@ export async function handleMcp(request: Request, env: Env = {}): Promise<Respon
     return jsonResponse(jsonRpcError(null, -32600, "Content-Type must be application/json."), {
       status: 415,
       headers: { Accept: "application/json", Allow: "POST, OPTIONS" }
-    });
+    }, request, env);
   }
 
   const contentLength = parseContentLength(request.headers.get("content-length"));
   if (contentLength !== null && contentLength > MAX_REQUEST_BYTES) {
     return jsonResponse(jsonRpcError(null, -32600, `Request body must be ${MAX_REQUEST_BYTES} bytes or less.`), {
       status: 413
-    });
+    }, request, env);
   }
 
   let payload: unknown;
@@ -200,33 +212,41 @@ export async function handleMcp(request: Request, env: Env = {}): Promise<Respon
     payload = JSON.parse(await readBoundedText(request));
   } catch (error) {
     if (error instanceof RequestTooLargeError) {
-      return jsonResponse(jsonRpcError(null, -32600, error.message), { status: 413 });
+      return jsonResponse(jsonRpcError(null, -32600, error.message), { status: 413 }, request, env);
     }
-    return jsonResponse(jsonRpcError(null, -32700, "Invalid JSON."), { status: 400 });
+    return jsonResponse(jsonRpcError(null, -32700, "Invalid JSON."), { status: 400 }, request, env);
   }
 
   if (Array.isArray(payload)) {
+    if (payload.length === 0) {
+      return jsonResponse(jsonRpcError(null, -32600, "Batch requests must contain at least one message."), {
+        status: 400
+      }, request, env);
+    }
+
     if (payload.length > MAX_BATCH_REQUESTS) {
       return jsonResponse(
         jsonRpcError(null, -32600, `Batch requests are limited to ${MAX_BATCH_REQUESTS} messages.`),
-        { status: 413 }
+        { status: 413 },
+        request,
+        env
       );
     }
 
     const handled = await Promise.all(payload.map((item) => handleJsonRpc(item, request, env)));
     const responses = handled.filter((item): item is Record<string, unknown> => item !== null);
     if (responses.length === 0) {
-      return new Response(null, { status: 202, headers: responseHeaders() });
+      return new Response(null, { status: 202, headers: responseHeaders({}, request, env) });
     }
-    return jsonResponse(responses);
+    return jsonResponse(responses, {}, request, env);
   }
 
   const response = await handleJsonRpc(payload, request, env);
   if (!response) {
-    return new Response(null, { status: 202, headers: responseHeaders() });
+    return new Response(null, { status: 202, headers: responseHeaders({}, request, env) });
   }
 
-  return jsonResponse(response);
+  return jsonResponse(response, {}, request, env);
 }
 
 async function handleJsonRpc(raw: unknown, request: Request, env: Env): Promise<Record<string, unknown> | null> {
@@ -241,7 +261,10 @@ async function handleJsonRpc(raw: unknown, request: Request, env: Env): Promise<
   }
 
   const isNotification = !Object.hasOwn(message, "id");
-  const auth = await authForJsonRpcMethod(message.method, request, env);
+  if (isNotification) {
+    return null;
+  }
+
   try {
     switch (message.method) {
       case "initialize":
@@ -253,6 +276,7 @@ async function handleJsonRpc(raw: unknown, request: Request, env: Env): Promise<
       case "tools/list":
         return jsonRpcResult(id, { tools: [toolDescriptor(env)] });
       case "tools/call":
+        const auth = await authenticateRequest(request, env);
         if (!auth.ok) {
           return jsonRpcResult(id, authRequiredToolResult(auth));
         }
@@ -398,27 +422,24 @@ function resourceDescriptor() {
 }
 
 function getAuthMode(env: Env): AuthMode {
-  const value = String(env.AUTH_MODE || "none").trim().toLowerCase();
+  const value = String(env.AUTH_MODE || "").trim().toLowerCase();
+  if (!value || value === "none" || value === "noauth" || value === "public") return "none";
   if (value === "admin" || value === "admin_token" || value === "password") return "admin_token";
   if (value === "oauth" || value === "oauth2") return "oauth";
-  return "none";
+  return "invalid";
 }
 
 function toolSecuritySchemes(env: Env) {
-  if (getAuthMode(env) !== "oauth") {
+  const mode = getAuthMode(env);
+  if (mode === "none" || mode === "admin_token") {
     return noAuthSecuritySchemes;
   }
 
-  return [{ type: "oauth2", scopes: oauthScopes(env) }];
-}
-
-async function authForJsonRpcMethod(method: string | undefined, request: Request, env: Env): Promise<AuthContext> {
-  const mode = getAuthMode(env);
-  if (mode === "none" || MCP_DISCOVERY_METHODS.has(String(method))) {
-    return { mode, ok: true };
+  if (mode === "oauth") {
+    return [{ type: "oauth2", scopes: oauthScopes(env) }];
   }
 
-  return authenticateRequest(request, env);
+  return [];
 }
 
 async function authenticateRequest(request: Request, env: Env): Promise<AuthContext> {
@@ -435,6 +456,10 @@ async function authenticateRequest(request: Request, env: Env): Promise<AuthCont
     };
   }
 
+  if (mode === "invalid") {
+    return { mode, ok: false, reason: "invalid_auth_mode" };
+  }
+
   const challenge = oauthChallenge(request, env, "invalid_token", "Sign in to use this quiz app.");
   const token = readBearerToken(request);
   if (!token) {
@@ -443,11 +468,12 @@ async function authenticateRequest(request: Request, env: Env): Promise<AuthCont
 
   try {
     const result = await verifyOAuthToken(token, request, env);
+    const challengeError = result.reason === "insufficient_scope" ? "insufficient_scope" : "invalid_token";
     return result.ok ? { mode, ok: true } : {
       mode,
       ok: false,
       reason: result.reason,
-      challenge: oauthChallenge(request, env, "invalid_token", result.description || "The access token is invalid.")
+      challenge: oauthChallenge(request, env, challengeError, result.description || "The access token is invalid.")
     };
   } catch {
     return {
@@ -490,33 +516,47 @@ function authRequiredToolResult(auth: AuthContext) {
 
 function protectedResourceMetadata(request: Request, env: Env) {
   const resource = oauthResource(request, env);
-  const authorizationServers = splitList(env.OAUTH_AUTHORIZATION_SERVERS || env.OAUTH_ISSUER);
+  const authorizationServers = splitList(env.OAUTH_AUTHORIZATION_SERVERS || env.OAUTH_ISSUER)
+    .map((item) => safeHttpsUrl(item))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 10);
+  const resourceDocumentation = safeHttpsUrl(env.OAUTH_RESOURCE_DOCUMENTATION);
   return {
     resource,
     authorization_servers: authorizationServers,
     scopes_supported: oauthScopes(env),
-    ...(env.OAUTH_RESOURCE_DOCUMENTATION ? { resource_documentation: env.OAUTH_RESOURCE_DOCUMENTATION } : {})
+    ...(resourceDocumentation ? { resource_documentation: resourceDocumentation } : {})
   };
 }
 
 function oauthChallenge(request: Request, env: Env, error: string, description: string): string {
   const metadataUrl = oauthResource(request, env) + "/.well-known/oauth-protected-resource";
-  return `Bearer resource_metadata="${metadataUrl}", scope="${oauthScopes(env).join(" ")}", error="${sanitizeHeaderValue(error)}", error_description="${sanitizeHeaderValue(description)}"`;
+  const scope = sanitizeHeaderValue(oauthScopes(env).join(" "));
+  return `Bearer resource_metadata="${metadataUrl}", scope="${scope}", error="${sanitizeHeaderValue(error)}", error_description="${sanitizeHeaderValue(description)}"`;
 }
 
 function oauthResource(request: Request, env: Env): string {
-  const configured = env.OAUTH_RESOURCE || env.PUBLIC_BASE_URL || env.WIDGET_DOMAIN;
-  if (configured && /^https:\/\/[^/]+$/.test(configured)) {
+  const configured = httpsOrigin(env.OAUTH_RESOURCE || env.PUBLIC_BASE_URL || env.WIDGET_DOMAIN);
+  if (configured) {
     return configured;
   }
 
-  const origin = new URL(request.url).origin;
-  return origin.startsWith("https://") ? origin : "https://web-sandbox.oaiusercontent.com";
+  return httpsOrigin(new URL(request.url).origin) || "https://web-sandbox.oaiusercontent.com";
 }
 
 function oauthScopes(env: Env): string[] {
   const scopes = splitList(env.OAUTH_SCOPES);
-  return scopes.length > 0 ? scopes : [DEFAULT_OAUTH_SCOPE];
+  if (scopes.length === 0) {
+    return [DEFAULT_OAUTH_SCOPE];
+  }
+
+  const uniqueScopes = [...new Set(scopes)];
+  return uniqueScopes.every(isSafeOAuthScope) ? uniqueScopes : [DEFAULT_OAUTH_SCOPE];
+}
+
+function acceptsResourceClaim(env: Env): boolean {
+  const value = String(env.OAUTH_ACCEPT_RESOURCE_CLAIM || "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
 }
 
 function readBearerToken(request: Request): string | null {
@@ -571,32 +611,17 @@ async function verifyOAuthToken(token: string, request: Request, env: Env): Prom
   if (header.alg !== "RS256") {
     return { ok: false, reason: "unsupported_alg", description: "The access token must use RS256." };
   }
-
-  const issuer = env.OAUTH_ISSUER;
-  if (!issuer || typeof payload.iss !== "string" || payload.iss !== issuer) {
-    return { ok: false, reason: "issuer_mismatch", description: "The access token issuer is not trusted." };
-  }
-
-  const audience = env.OAUTH_AUDIENCE || oauthResource(request, env);
-  if (!hasAudience(payload.aud, audience) && !hasAudience(payload.resource, audience)) {
-    return { ok: false, reason: "audience_mismatch", description: "The access token was not issued for this app." };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  if (typeof payload.exp !== "number" || payload.exp < now - 60) {
-    return { ok: false, reason: "expired_token", description: "The access token has expired." };
-  }
-  if (typeof payload.nbf === "number" && payload.nbf > now + 60) {
-    return { ok: false, reason: "premature_token", description: "The access token is not valid yet." };
-  }
-  if (!hasRequiredScopes(payload, oauthScopes(env))) {
-    return { ok: false, reason: "insufficient_scope", description: "The access token is missing a required scope." };
+  if (header.crit !== undefined) {
+    return { ok: false, reason: "unsupported_crit", description: "The access token uses unsupported critical headers." };
   }
 
   const keys = await fetchJwks(env);
+  const kid = typeof header.kid === "string" ? header.kid : "";
+  if (!kid && keys.length !== 1) {
+    return { ok: false, reason: "missing_key", description: "No matching signing key was found." };
+  }
   const key = keys.find((candidate) => {
     const jwk = candidate as JsonWebKey & { alg?: string; kid?: string };
-    const kid = typeof header.kid === "string" ? header.kid : "";
     if (kid && jwk.kid !== kid) return false;
     if (jwk.kty !== "RSA") return false;
     if (jwk.use && jwk.use !== "sig") return false;
@@ -621,18 +646,54 @@ async function verifyOAuthToken(token: string, request: Request, env: Env): Prom
     new TextEncoder().encode(parts[0] + "." + parts[1])
   );
 
-  return valid ? { ok: true } : {
-    ok: false,
-    reason: "bad_signature",
-    description: "The access token signature is invalid."
-  };
+  if (!valid) {
+    return {
+      ok: false,
+      reason: "bad_signature",
+      description: "The access token signature is invalid."
+    };
+  }
+
+  const issuer = safeHttpsUrl(env.OAUTH_ISSUER);
+  if (!issuer || typeof payload.iss !== "string" || payload.iss !== issuer) {
+    return { ok: false, reason: "issuer_mismatch", description: "The access token issuer is not trusted." };
+  }
+
+  const configuredAudience = String(env.OAUTH_AUDIENCE || "").trim();
+  const audience = configuredAudience && configuredAudience.toLowerCase() !== "auto"
+    ? configuredAudience
+    : oauthResource(request, env);
+  if (!hasAudience(payload.aud, audience) && !(acceptsResourceClaim(env) && hasAudience(payload.resource, audience))) {
+    return { ok: false, reason: "audience_mismatch", description: "The access token was not issued for this app." };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof payload.exp !== "number" || payload.exp < now - 60) {
+    return { ok: false, reason: "expired_token", description: "The access token has expired." };
+  }
+  if (typeof payload.nbf === "number" && payload.nbf > now + 60) {
+    return { ok: false, reason: "premature_token", description: "The access token is not valid yet." };
+  }
+  if (!hasRequiredScopes(payload, oauthScopes(env))) {
+    return { ok: false, reason: "insufficient_scope", description: "The access token is missing a required scope." };
+  }
+
+  return { ok: true };
 }
 
 async function fetchJwks(env: Env): Promise<JsonWebKey[]> {
-  const issuer = env.OAUTH_ISSUER;
-  const jwksUrl = env.OAUTH_JWKS_URL || (issuer ? issuer.replace(/\/$/, "") + "/.well-known/jwks.json" : "");
-  if (!jwksUrl || !/^https:\/\//.test(jwksUrl)) {
+  const issuer = safeHttpsUrl(env.OAUTH_ISSUER);
+  const rawJwksUrl = String(env.OAUTH_JWKS_URL || "").trim();
+  const configuredJwksUrl = rawJwksUrl ? safeHttpsUrl(rawJwksUrl) : null;
+  if (rawJwksUrl && !configuredJwksUrl) {
     throw new Error("OAUTH_JWKS_URL must be an HTTPS URL.");
+  }
+  const jwksUrl = configuredJwksUrl || (issuer ? issuer.replace(/\/$/, "") + "/.well-known/jwks.json" : "");
+  if (!issuer || !jwksUrl) {
+    throw new Error("OAUTH_JWKS_URL must be an HTTPS URL.");
+  }
+  if (new URL(issuer).origin !== new URL(jwksUrl).origin) {
+    throw new Error("OAUTH_JWKS_URL must use the same origin as OAUTH_ISSUER.");
   }
 
   const now = Date.now();
@@ -641,10 +702,15 @@ async function fetchJwks(env: Env): Promise<JsonWebKey[]> {
   }
 
   const response = await fetch(jwksUrl, {
-    headers: { Accept: "application/json" }
+    headers: { Accept: "application/json" },
+    redirect: "error"
   });
   if (!response.ok) {
     throw new Error("JWKS fetch failed.");
+  }
+  const contentType = response.headers.get("content-type");
+  if (contentType && !isJsonResponseContentType(contentType)) {
+    throw new Error("JWKS response must be JSON.");
   }
   const body = JSON.parse(await readBoundedResponseText(response, MAX_JWKS_BYTES)) as { keys?: JsonWebKey[] };
   const keys = Array.isArray(body.keys)
@@ -659,11 +725,15 @@ async function fetchJwks(env: Env): Promise<JsonWebKey[]> {
 }
 
 function parseJwtPart(part: string): Record<string, unknown> | null {
-  if (!part || part.length > MAX_JWT_PART_CHARS || !/^[A-Za-z0-9_-]+$/.test(part)) {
+  if (!part || part.length > MAX_JWT_PART_CHARS || !isBase64UrlSegment(part)) {
     return null;
   }
   try {
-    return JSON.parse(new TextDecoder().decode(base64UrlToBytes(part))) as Record<string, unknown>;
+    const parsed = JSON.parse(new TextDecoder().decode(base64UrlToBytes(part))) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -679,16 +749,28 @@ function base64UrlToBytes(value: string): Uint8Array {
   return bytes;
 }
 
+function isBase64UrlSegment(value: string): boolean {
+  return value.length > 0 && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
 function hasAudience(value: unknown, expected: string): boolean {
   if (typeof value === "string") return value === expected;
-  if (Array.isArray(value)) return value.includes(expected);
+  if (Array.isArray(value)) return value.some((item) => item === expected);
   return false;
 }
 
 function isUsableJwk(value: unknown): value is JsonWebKey {
   if (!value || typeof value !== "object") return false;
-  const jwk = value as JsonWebKey & { use?: string };
-  return jwk.kty === "RSA" && (!jwk.use || jwk.use === "sig") && typeof jwk.n === "string" && typeof jwk.e === "string";
+  const jwk = value as JsonWebKey & { alg?: string; use?: string };
+  return jwk.kty === "RSA"
+    && (!jwk.use || jwk.use === "sig")
+    && (!jwk.alg || jwk.alg === "RS256")
+    && typeof jwk.n === "string"
+    && typeof jwk.e === "string"
+    && jwk.n.length <= MAX_JWK_MODULUS_CHARS
+    && jwk.e.length <= MAX_JWK_EXPONENT_CHARS
+    && isBase64UrlSegment(jwk.n)
+    && isBase64UrlSegment(jwk.e);
 }
 
 function hasRequiredScopes(payload: Record<string, unknown>, requiredScopes: string[]): boolean {
@@ -713,8 +795,48 @@ function splitList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function isSafeOAuthScope(value: string): boolean {
+  return value.length > 0 && value.length <= 128 && /^[\x21\x23-\x5b\x5d-\x7e]+$/.test(value);
+}
+
 function sanitizeHeaderValue(value: string): string {
-  return value.replace(/[^\t\x20-\x7e]/g, "").replace(/["\\]/g, "");
+  return value.replace(/[^\x20-\x7e]/g, "").replace(/["\\]/g, "").trim().slice(0, 256);
+}
+
+function safeHttpsUrl(value: string | undefined): string | null {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+      return null;
+    }
+
+    return url.pathname === "/" ? url.origin : url.href;
+  } catch {
+    return null;
+  }
+}
+
+function httpsOrigin(value: string | undefined): string | null {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+      return null;
+    }
+
+    return url.origin;
+  } catch {
+    return null;
+  }
 }
 
 function constantTimeEqual(a: string, b: string): boolean {
@@ -901,7 +1023,12 @@ function isJsonContentType(value: string | null): boolean {
   return mediaType === "application/json" || mediaType === "application/json-rpc";
 }
 
-function requireMethod(request: Request, allowed: string[]): Response | null {
+function isJsonResponseContentType(value: string): boolean {
+  const mediaType = value.split(";")[0]?.trim().toLowerCase();
+  return mediaType === "application/json" || mediaType.endsWith("+json");
+}
+
+function requireMethod(request: Request, allowed: string[], env: Env = {}): Response | null {
   if (allowed.includes(request.method)) {
     return null;
   }
@@ -911,7 +1038,7 @@ function requireMethod(request: Request, allowed: string[]): Response | null {
     headers: responseHeaders({
       "Content-Type": "text/plain; charset=utf-8",
       Allow: [...allowed, "OPTIONS"].join(", ")
-    })
+    }, request, env)
   });
 }
 
@@ -989,13 +1116,12 @@ function readProtocolVersion(params: unknown): string {
 }
 
 function resolveWidgetDomain(request: Request, env: Env): string {
-  const configured = env.WIDGET_DOMAIN || env.PUBLIC_BASE_URL;
-  if (configured && /^https:\/\/[^/]+$/.test(configured)) {
+  const configured = httpsOrigin(env.WIDGET_DOMAIN || env.PUBLIC_BASE_URL);
+  if (configured) {
     return configured;
   }
 
-  const origin = new URL(request.url).origin;
-  return origin.startsWith("https://") ? origin : "https://web-sandbox.oaiusercontent.com";
+  return httpsOrigin(new URL(request.url).origin) || "https://web-sandbox.oaiusercontent.com";
 }
 
 function asRecord(value: unknown, message: string): Record<string, unknown> {
@@ -1025,22 +1151,67 @@ function jsonRpcError(id: JsonRpcId, code: number, message: string) {
   };
 }
 
-function jsonResponse(body: unknown, init: ResponseInit = {}) {
+function jsonResponse(body: unknown, init: ResponseInit = {}, request?: Request, env: Env = {}) {
   return new Response(JSON.stringify(body), {
     ...init,
     headers: responseHeaders({
       ...JSON_HEADERS,
       ...(init.headers ? Object.fromEntries(new Headers(init.headers).entries()) : {})
-    })
+    }, request, env)
   });
 }
 
-function responseHeaders(headers: Record<string, string> = {}) {
+function responseHeaders(headers: Record<string, string> = {}, request?: Request, env: Env = {}) {
   return {
-    ...CORS_HEADERS,
+    ...corsHeaders(request, env),
     ...SECURITY_HEADERS,
     "Mcp-Protocol-Version": LATEST_PROTOCOL_VERSION,
     "Cache-Control": "no-store",
     ...headers
   };
+}
+
+function corsHeaders(request?: Request, env: Env = {}): Record<string, string> {
+  const allowedOrigin = allowedCorsOrigin(request, env);
+  return {
+    ...CORS_HEADERS,
+    ...(allowedOrigin ? { "Access-Control-Allow-Origin": allowedOrigin } : {}),
+    ...(request?.headers.get("origin") && allowedOrigin && allowedOrigin !== "*" ? { Vary: "Origin" } : {})
+  };
+}
+
+function isCorsAllowed(request: Request, env: Env): boolean {
+  return Boolean(allowedCorsOrigin(request, env));
+}
+
+function allowedCorsOrigin(request?: Request, env: Env = {}): string | null {
+  if (!request) {
+    return "*";
+  }
+
+  const origin = request.headers.get("origin");
+  if (!origin) {
+    return "*";
+  }
+
+  const normalizedOrigin = httpsOrigin(origin);
+  if (!normalizedOrigin) {
+    return null;
+  }
+
+  if (TRUSTED_CORS_ORIGINS.has(normalizedOrigin)) {
+    return normalizedOrigin;
+  }
+
+  if (normalizedOrigin === httpsOrigin(new URL(request.url).origin)) {
+    return normalizedOrigin;
+  }
+
+  for (const configured of [env.PUBLIC_BASE_URL, env.WIDGET_DOMAIN, env.OAUTH_RESOURCE]) {
+    if (normalizedOrigin === httpsOrigin(configured)) {
+      return normalizedOrigin;
+    }
+  }
+
+  return null;
 }

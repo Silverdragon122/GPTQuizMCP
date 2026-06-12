@@ -11,8 +11,8 @@ describe("mcp endpoint", () => {
     expect(tool.name).toBe("render_inline_quiz");
     expect(tool.securitySchemes).toEqual([{ type: "noauth" }]);
     expect(tool.annotations.readOnlyHint).toBe(true);
-    expect(tool._meta.ui.resourceUri).toBe("ui://widget/inline-quiz-v3.html");
-    expect(tool._meta["openai/outputTemplate"]).toBe("ui://widget/inline-quiz-v3.html");
+    expect(tool._meta.ui.resourceUri).toBe("ui://widget/inline-quiz-v5.html");
+    expect(tool._meta["openai/outputTemplate"]).toBe("ui://widget/inline-quiz-v5.html");
     expect(tool.description).toContain("single call");
     expect(tool.description).toContain("do not refuse");
     expect(tool.description).toContain("may mark more than one");
@@ -43,11 +43,11 @@ describe("mcp endpoint", () => {
   });
 
   it("reads the widget resource with mcp-app mime type and CSP metadata", async () => {
-    const response = await rpc("resources/read", { uri: "ui://widget/inline-quiz-v3.html" });
+    const response = await rpc("resources/read", { uri: "ui://widget/inline-quiz-v5.html" });
     const body = await response.json() as any;
     const content = body.result.contents[0];
 
-    expect(content.uri).toBe("ui://widget/inline-quiz-v3.html");
+    expect(content.uri).toBe("ui://widget/inline-quiz-v5.html");
     expect(content.mimeType).toBe("text/html;profile=mcp-app");
     expect(content.text).toContain("quiz-root");
     expect(content._meta.ui.csp.connectDomains).toEqual([]);
@@ -57,8 +57,13 @@ describe("mcp endpoint", () => {
     expect(content._meta["openai/widgetDescription"]).toContain("interactive quiz");
   });
 
-  it("keeps old widget resource URIs readable while new metadata points to v3", async () => {
-    for (const uri of ["ui://widget/inline-quiz-v1.html", "ui://widget/inline-quiz-v2.html"]) {
+  it("keeps old widget resource URIs readable while new metadata points to v5", async () => {
+    for (const uri of [
+      "ui://widget/inline-quiz-v1.html",
+      "ui://widget/inline-quiz-v2.html",
+      "ui://widget/inline-quiz-v3.html",
+      "ui://widget/inline-quiz-v4.html"
+    ]) {
       const response = await rpc("resources/read", { uri });
       const body = await response.json() as any;
       const content = body.result.contents[0];
