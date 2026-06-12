@@ -74,6 +74,8 @@ const MAX_EXPLANATION_LENGTH = 700;
 const MIN_ANSWERS = 2;
 const MAX_ANSWERS = 6;
 const TOKEN_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+const UINT32_RANGE = 0x100000000;
+const RAW_STRING_LENGTH_FACTOR = 4;
 
 export class QuizInputError extends Error {
   constructor(message: string) {
@@ -175,22 +177,33 @@ export function buildQuiz(rawInput: unknown, options: BuildQuizOptions = {}) {
 
 export function normalizeQuizInput(rawInput: unknown): NormalizedQuiz {
   const input = assertRecord(rawInput, "Input must be an object.");
-  const rawQuestions = input.questions;
-  if (!Array.isArray(rawQuestions)) {
-    throw new QuizInputError("Input must include a questions array.");
-  }
-  if (rawQuestions.length < 1) {
+  const rawQuestions = readOwnDataProperty(input, "questions", "questions");
+  const rawQuestionArray = assertArray(rawQuestions, "Input must include a questions array.");
+  const questionCount = readArrayLength(rawQuestionArray, "questions", "Input must include a questions array.");
+  if (questionCount < 1) {
     throw new QuizInputError("Include at least one question.");
   }
-  if (rawQuestions.length > MAX_QUESTIONS) {
+  if (questionCount > MAX_QUESTIONS) {
     throw new QuizInputError(`Include at most ${MAX_QUESTIONS} questions.`);
   }
 
-  const title = optionalString(input.title, "title", MAX_TITLE_LENGTH) ?? "Quick quiz";
-  const shuffleQuestions = input.shuffleQuestions === undefined ? true : input.shuffleQuestions === true;
-  const targetGradePercent = normalizeTargetGrade(input.targetGradePercent ?? input.passingScorePercent);
-  const theme = normalizeTheme(input.theme);
-  const questions = rawQuestions.map((rawQuestion, index) => normalizeQuestion(rawQuestion, index));
+  const rawTargetGradePercent = readOwnDataProperty(input, "targetGradePercent", "targetGradePercent");
+  const rawPassingScorePercent = readOwnDataProperty(input, "passingScorePercent", "passingScorePercent");
+  const title = optionalString(
+    readOwnDataProperty(input, "title", "title"),
+    "title",
+    MAX_TITLE_LENGTH
+  ) ?? "Quick quiz";
+  const shuffleQuestions = normalizeShuffleQuestions(
+    readOwnDataProperty(input, "shuffleQuestions", "shuffleQuestions")
+  );
+  const targetGradePercent = normalizeTargetGrade(
+    rawTargetGradePercent === undefined ? rawPassingScorePercent : rawTargetGradePercent
+  );
+  const theme = normalizeTheme(readOwnDataProperty(input, "theme", "theme"));
+  const questions = readDenseArray(rawQuestionArray, "questions", questionCount).map((rawQuestion, index) =>
+    normalizeQuestion(rawQuestion, index)
+  );
   enforceTotalTextBudget(title, questions);
   const retakeInput: RenderQuizInput = {
     title,
@@ -223,8 +236,11 @@ export function secureRandomInt(maxExclusive: number): number {
   if (!Number.isSafeInteger(maxExclusive) || maxExclusive <= 0) {
     throw new Error("maxExclusive must be a positive safe integer.");
   }
+  if (maxExclusive > UINT32_RANGE) {
+    throw new Error(`maxExclusive must be at most ${UINT32_RANGE}.`);
+  }
 
-  const limit = 0xffffffff - (0xffffffff % maxExclusive);
+  const limit = UINT32_RANGE - (UINT32_RANGE % maxExclusive);
   const buffer = new Uint32Array(1);
   let value = 0;
 
@@ -238,19 +254,26 @@ export function secureRandomInt(maxExclusive: number): number {
 
 function normalizeQuestion(rawQuestion: unknown, index: number): NormalizedQuestion {
   const question = assertRecord(rawQuestion, `Question ${index + 1} must be an object.`);
-  const prompt = requiredString(question.prompt, `questions[${index}].prompt`, MAX_PROMPT_LENGTH);
-  const rawAnswers = question.answers;
+  const prompt = requiredString(
+    readOwnDataProperty(question, "prompt", `questions[${index}].prompt`),
+    `questions[${index}].prompt`,
+    MAX_PROMPT_LENGTH
+  );
+  const rawAnswers = readOwnDataProperty(question, "answers", `questions[${index}].answers`);
 
-  if (!Array.isArray(rawAnswers)) {
-    throw new QuizInputError(`Question ${index + 1} must include an answers array.`);
-  }
-  if (rawAnswers.length < MIN_ANSWERS || rawAnswers.length > MAX_ANSWERS) {
+  const rawAnswerArray = assertArray(rawAnswers, `Question ${index + 1} must include an answers array.`);
+  const answerCount = readArrayLength(
+    rawAnswerArray,
+    `questions[${index}].answers`,
+    `Question ${index + 1} must include an answers array.`
+  );
+  if (answerCount < MIN_ANSWERS || answerCount > MAX_ANSWERS) {
     throw new QuizInputError(`Question ${index + 1} must include ${MIN_ANSWERS}-${MAX_ANSWERS} answers.`);
   }
 
-  const explicitType = question.type;
-  const answers = rawAnswers.map((rawAnswer, answerIndex) =>
-    normalizeAnswer(rawAnswer, index, answerIndex)
+  const explicitType = readOwnDataProperty(question, "type", `questions[${index}].type`);
+  const answers = readDenseArray(rawAnswerArray, `questions[${index}].answers`, answerCount).map(
+    (rawAnswer, answerIndex) => normalizeAnswer(rawAnswer, index, answerIndex)
   );
   const type = explicitType === undefined ? inferQuestionType(answers) : explicitType;
   if (type !== "multiple_choice" && type !== "true_false") {
@@ -272,7 +295,11 @@ function normalizeQuestion(rawQuestion: unknown, index: number): NormalizedQuest
     prompt,
     type,
     answers,
-    explanation: optionalString(question.explanation, `questions[${index}].explanation`, MAX_EXPLANATION_LENGTH)
+    explanation: optionalString(
+      readOwnDataProperty(question, "explanation", `questions[${index}].explanation`),
+      `questions[${index}].explanation`,
+      MAX_EXPLANATION_LENGTH
+    )
   };
 }
 
@@ -282,7 +309,13 @@ function normalizeAnswer(rawAnswer: unknown, questionIndex: number, answerIndex:
     `questions[${questionIndex}].answers[${answerIndex}] must be an object.`
   );
 
-  if (answer.correct !== undefined && typeof answer.correct !== "boolean") {
+  const correct = readOwnDataProperty(
+    answer,
+    "correct",
+    `questions[${questionIndex}].answers[${answerIndex}].correct`
+  );
+
+  if (correct !== undefined && typeof correct !== "boolean") {
     throw new QuizInputError(
       `questions[${questionIndex}].answers[${answerIndex}].correct must be a boolean.`
     );
@@ -290,13 +323,17 @@ function normalizeAnswer(rawAnswer: unknown, questionIndex: number, answerIndex:
 
   return {
     text: requiredString(
-      answer.text,
+      readOwnDataProperty(answer, "text", `questions[${questionIndex}].answers[${answerIndex}].text`),
       `questions[${questionIndex}].answers[${answerIndex}].text`,
       MAX_ANSWER_LENGTH
     ),
-    correct: answer.correct === true,
+    correct: correct === true,
     explanation: optionalString(
-      answer.explanation,
+      readOwnDataProperty(
+        answer,
+        "explanation",
+        `questions[${questionIndex}].answers[${answerIndex}].explanation`
+      ),
       `questions[${questionIndex}].answers[${answerIndex}].explanation`,
       MAX_EXPLANATION_LENGTH
     )
@@ -323,6 +360,17 @@ function normalizeTargetGrade(value: unknown): number {
   return value;
 }
 
+function normalizeShuffleQuestions(value: unknown): boolean {
+  if (value === undefined) {
+    return true;
+  }
+  if (typeof value !== "boolean") {
+    throw new QuizInputError("shuffleQuestions must be a boolean.");
+  }
+
+  return value;
+}
+
 function normalizeTheme(value: unknown): QuizThemeId | undefined {
   if (value === undefined) {
     return undefined;
@@ -343,12 +391,89 @@ function assertRecord(value: unknown, message: string): Record<string, unknown> 
     throw new QuizInputError(message);
   }
 
+  let prototype: object | null;
+  try {
+    prototype = Object.getPrototypeOf(value);
+  } catch {
+    throw new QuizInputError(message);
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new QuizInputError(message);
+  }
+
   return value as Record<string, unknown>;
+}
+
+function readOwnDataProperty(record: Record<string, unknown>, key: string, path: string): unknown {
+  const descriptor = getOwnDescriptor(record, key, path);
+  if (!descriptor) {
+    return undefined;
+  }
+  if (!("value" in descriptor)) {
+    throw new QuizInputError(`${path} must be a data property.`);
+  }
+
+  return descriptor.value;
+}
+
+function assertArray(value: unknown, message: string): readonly unknown[] {
+  if (!Array.isArray(value)) {
+    throw new QuizInputError(message);
+  }
+
+  let prototype: object | null;
+  try {
+    prototype = Object.getPrototypeOf(value);
+  } catch {
+    throw new QuizInputError(message);
+  }
+  if (prototype !== Array.prototype) {
+    throw new QuizInputError(message);
+  }
+
+  return value;
+}
+
+function readArrayLength(items: readonly unknown[], path: string, message: string): number {
+  const descriptor = getOwnDescriptor(items, "length", `${path}.length`);
+  if (!descriptor || !("value" in descriptor) || !Number.isSafeInteger(descriptor.value) || descriptor.value < 0) {
+    throw new QuizInputError(message);
+  }
+
+  return descriptor.value;
+}
+
+function readDenseArray(items: readonly unknown[], path: string, length: number): unknown[] {
+  const values: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const itemPath = `${path}[${index}]`;
+    const descriptor = getOwnDescriptor(items, String(index), itemPath);
+    if (!descriptor) {
+      throw new QuizInputError(`${itemPath} must be provided.`);
+    }
+    if (!("value" in descriptor)) {
+      throw new QuizInputError(`${itemPath} must be a data property.`);
+    }
+    values.push(descriptor.value);
+  }
+
+  return values;
+}
+
+function getOwnDescriptor(value: object, key: string, path: string): PropertyDescriptor | undefined {
+  try {
+    return Object.getOwnPropertyDescriptor(value, key);
+  } catch {
+    throw new QuizInputError(`${path} could not be read.`);
+  }
 }
 
 function requiredString(value: unknown, path: string, maxLength: number): string {
   if (typeof value !== "string") {
     throw new QuizInputError(`${path} must be a string.`);
+  }
+  if (value.length > maxLength * RAW_STRING_LENGTH_FACTOR) {
+    throw new QuizInputError(`${path} is too large before cleanup.`);
   }
 
   const text = cleanText(value);
@@ -365,7 +490,7 @@ function requiredString(value: unknown, path: string, maxLength: number): string
 function cleanText(value: string): string {
   return value
     .normalize("NFC")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "")
     .replace(/[\u202A-\u202E\u2066-\u2069]/g, "")
     .replace(/[ \t\r\n]+/g, " ")
     .trim();
@@ -398,7 +523,7 @@ function optionalString(value: unknown, path: string, maxLength: number): string
 function shuffleArray<T>(items: readonly T[], rng: RandomInt): T[] {
   const output = [...items];
   for (let index = output.length - 1; index > 0; index -= 1) {
-    const swapIndex = rng(index + 1);
+    const swapIndex = randomIndex(index + 1, rng);
     [output[index], output[swapIndex]] = [output[swapIndex] as T, output[index] as T];
   }
 
@@ -408,8 +533,17 @@ function shuffleArray<T>(items: readonly T[], rng: RandomInt): T[] {
 function randomToken(length: number, rng: RandomInt): string {
   let token = "";
   for (let index = 0; index < length; index += 1) {
-    token += TOKEN_ALPHABET[rng(TOKEN_ALPHABET.length)] ?? "0";
+    token += TOKEN_ALPHABET[randomIndex(TOKEN_ALPHABET.length, rng)] ?? "0";
   }
 
   return token;
+}
+
+function randomIndex(maxExclusive: number, rng: RandomInt): number {
+  const value = rng(maxExclusive);
+  if (!Number.isSafeInteger(value) || value < 0 || value >= maxExclusive) {
+    throw new Error("Random integer generator returned an out-of-range value.");
+  }
+
+  return value;
 }
