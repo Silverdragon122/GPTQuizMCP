@@ -7,8 +7,13 @@
   "observability": {
     "enabled": true
   },
+  // This checked-in deployment is intentionally public/no-auth for a quiz app
+  // that does not store user data or call paid/private APIs.
+  // Keep bearer tokens, OAuth secrets, and personal deployment URLs out of vars.
   "vars": {
     "AUTH_MODE": "none",
+    // Optional HTTPS origins only, no path. Leave blank to derive the public
+    // widget origin from the incoming request on production HTTPS.
     "PUBLIC_BASE_URL": "",
     "WIDGET_DOMAIN": ""
   }

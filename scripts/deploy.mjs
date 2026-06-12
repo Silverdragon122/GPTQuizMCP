@@ -35,32 +35,29 @@ async function main() {
   const workerName = await askText("Cloudflare Worker name", String(config.name || "quiz-mcp"));
   config.name = slugifyWorkerName(workerName);
 
+  const currentAuthMode = normalizeAuthMode(config.vars.AUTH_MODE);
   const authMode = await askChoice("Access mode", [
     ["none", "No authentication (recommended for most quiz apps)"],
     ["oauth", "OAuth 2.1 with an identity provider (for private organizations)"],
     ["admin_token", "Private admin password gate (simple, probe-resistant)"],
-  ], "none");
+  ], currentAuthMode);
 
   config.vars.AUTH_MODE = authMode;
+  delete config.vars.ADMIN_BEARER_TOKEN;
 
   let adminToken = "";
   let oauthWasAutoAudience = false;
   if (authMode === "admin_token") {
+    clearOAuthVars(config.vars);
     adminToken = randomToken();
     await configureAdminToken(adminToken, config);
   } else if (authMode === "oauth") {
     oauthWasAutoAudience = await configureOAuth(config);
   } else {
-    delete config.vars.ADMIN_BEARER_TOKEN;
-    delete config.vars.OAUTH_AUTHORIZATION_SERVERS;
-    delete config.vars.OAUTH_AUDIENCE;
-    delete config.vars.OAUTH_ISSUER;
-    delete config.vars.OAUTH_JWKS_URL;
-    delete config.vars.OAUTH_RESOURCE;
-    delete config.vars.OAUTH_RESOURCE_DOCUMENTATION;
-    delete config.vars.OAUTH_SCOPES;
+    clearOAuthVars(config.vars);
   }
 
+  clearTrackedDeploymentUrls(config.vars);
   writeWranglerConfig(config);
   ensureCloudflareLogin();
 
@@ -76,20 +73,16 @@ async function main() {
     throw new Error("Wrangler deploy finished, but I could not find the deployed workers.dev URL in the output.");
   }
 
-  config.vars.PUBLIC_BASE_URL = deployedUrl;
-  config.vars.WIDGET_DOMAIN = deployedUrl;
-  if (authMode === "oauth") {
-    config.vars.OAUTH_RESOURCE = deployedUrl;
-    if (oauthWasAutoAudience || !config.vars.OAUTH_AUDIENCE || config.vars.OAUTH_AUDIENCE === "auto") {
-      config.vars.OAUTH_AUDIENCE = deployedUrl;
-    }
+  if (authMode === "oauth" && (oauthWasAutoAudience || !config.vars.OAUTH_AUDIENCE)) {
+    config.vars.OAUTH_AUDIENCE = "auto";
   }
+  clearTrackedDeploymentUrls(config.vars);
   writeWranglerConfig(config);
 
   console.log("");
-  console.log("Redeploying with PUBLIC_BASE_URL and widget domain set to:");
+  console.log("Deployment URL:");
   console.log(deployedUrl);
-  run("npm", ["run", "deploy"]);
+  console.log("The checked-in Wrangler config was left without a personal deployment URL.");
 
   const state = {
     workerName: config.name,
@@ -191,7 +184,10 @@ async function configureOAuth(config) {
     String(config.vars.OAUTH_JWKS_URL || issuer.replace(/\/$/, "") + "/.well-known/jwks.json")
   );
   const scopes = await askText("Required scope(s)", String(config.vars.OAUTH_SCOPES || "quiz:render"));
-  const audience = await askText("Token audience/resource, or press Enter for deployed Worker URL", String(config.vars.OAUTH_AUDIENCE || ""));
+  const audience = await askText(
+    "Token audience/resource, or press Enter to derive the deployed Worker URL at runtime",
+    String(config.vars.OAUTH_AUDIENCE || "")
+  );
   const docsUrl = await askText("Optional auth documentation URL", String(config.vars.OAUTH_RESOURCE_DOCUMENTATION || ""));
 
   config.vars.AUTH_MODE = "oauth";
@@ -259,7 +255,7 @@ function printNextSteps(deployedUrl, authMode, config, adminToken) {
     console.log("  Header value: Authorization: Bearer <the password above>");
   } else {
     console.log("");
-    console.log("No auth is enabled. Use this only for local testing or trusted private experiments.");
+    console.log("No auth is enabled. The MCP endpoint is publicly reachable; use this only for quiz apps that do not handle private data.");
   }
 }
 
@@ -278,6 +274,32 @@ function writeAdminFile(value) {
     chmodSync(adminPath, 0o600);
   } catch {
     // Best-effort on filesystems that support POSIX permissions.
+  }
+}
+
+function normalizeAuthMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized || normalized === "none" || normalized === "noauth" || normalized === "public") return "none";
+  if (normalized === "admin" || normalized === "admin_token" || normalized === "password") return "admin_token";
+  if (normalized === "oauth" || normalized === "oauth2") return "oauth";
+  throw new Error(`Unsupported AUTH_MODE "${value}". Use one of: none, oauth, admin_token.`);
+}
+
+function clearOAuthVars(vars) {
+  delete vars.OAUTH_AUTHORIZATION_SERVERS;
+  delete vars.OAUTH_AUDIENCE;
+  delete vars.OAUTH_ISSUER;
+  delete vars.OAUTH_JWKS_URL;
+  delete vars.OAUTH_RESOURCE;
+  delete vars.OAUTH_RESOURCE_DOCUMENTATION;
+  delete vars.OAUTH_SCOPES;
+}
+
+function clearTrackedDeploymentUrls(vars) {
+  vars.PUBLIC_BASE_URL = "";
+  vars.WIDGET_DOMAIN = "";
+  if (vars.OAUTH_RESOURCE && /\.workers\.dev(?::\d+)?$/i.test(String(vars.OAUTH_RESOURCE))) {
+    delete vars.OAUTH_RESOURCE;
   }
 }
 

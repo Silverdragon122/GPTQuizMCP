@@ -29,6 +29,8 @@ For most people, use **No authentication**.
 
 This app does not read private files, call paid APIs, store user data, or change anything outside the quiz widget. ChatGPT app setup is also much simpler with no auth.
 
+No authentication means the deployed MCP endpoint is publicly reachable. Use it only for quizzes and content that are safe to expose publicly.
+
 Use OAuth only if you are publishing a private app for a school, company, or closed group. OAuth requires a real identity provider.
 
 Use the admin password mode only for your own testing. ChatGPT may not offer the header-based auth option needed for it.
@@ -108,6 +110,7 @@ npm run deploy
 ```
 
 The deploy command uses Wrangler and minifies the Worker before upload.
+The checked-in `wrangler.jsonc` is public/no-auth and intentionally leaves deployment-specific URLs blank. On production HTTPS, the Worker derives widget metadata from the incoming request origin. Keep personal workers.dev URLs in local notes or ignored deploy state, not in git.
 
 ## Local Development
 
@@ -129,8 +132,15 @@ The local smoke test checks:
 - tool listing
 - widget resource reading
 - quiz rendering
+- no-auth Apps SDK metadata
+- the v5 widget template URI
+- empty widget connect/resource domains
+- the direct widget route CSP
+- hidden OAuth metadata in no-auth mode
 
 The root page (`/`) and demo preview page (`/preview`) are intentionally not served. This repo is meant to expose the MCP endpoint, not a public website.
+
+The widget vendors KaTeX 0.17.0 into `src/vendor/katex.ts` with `npm run vendor:katex` and embeds it inline. No CDN or auto-updating math script is loaded at runtime.
 
 ## Tool Input
 
@@ -184,6 +194,7 @@ Default and recommended.
 ```
 
 Use this for public quiz widgets and normal ChatGPT app setup.
+Do not use this mode for private course material, internal exams, or anything that requires access control.
 
 ### oauth
 
@@ -216,8 +227,13 @@ Do not commit `.quizmcp-admin.json`. It is already ignored by git.
 - Requests, batch size, question count, string length, and total quiz text are limited.
 - Control characters and bidirectional override characters are stripped from quiz text.
 - The widget does not load external scripts, fonts, frames, or images.
+- The widget's LaTeX renderer is vendored and pinned instead of loaded from a CDN.
 - The app serves no public root HTML page.
 - Secrets belong in Cloudflare secrets or local ignored files, never in git.
+- Do not put `ADMIN_BEARER_TOKEN` or provider secrets in `wrangler.jsonc` `vars`.
+- Do not commit personal workers.dev URLs. Leave `PUBLIC_BASE_URL` and `WIDGET_DOMAIN` blank unless you are committing a generic placeholder.
+- The guided deploy preserves an existing private auth mode as the default choice, so pressing Enter will not silently switch an OAuth/admin deployment back to public no-auth.
+- The guided deploy rejects unknown `AUTH_MODE` values instead of guessing.
 
 ## Useful Files
 
