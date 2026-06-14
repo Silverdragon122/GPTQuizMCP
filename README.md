@@ -171,6 +171,24 @@ Example input:
 }
 ```
 
+Compact input for long quizzes is also accepted:
+
+```json
+{
+  "title": "Sample quiz",
+  "questions": [
+    {
+      "q": "Which number is prime?",
+      "type": "mc",
+      "a": [
+        { "t": "2", "c": true },
+        { "t": "4" }
+      ]
+    }
+  ]
+}
+```
+
 Rules:
 
 - A quiz can have 1 to 500 questions.
@@ -178,9 +196,12 @@ Rules:
 - `multiple_choice` questions need at least one correct answer.
 - `multiple_choice` questions may have more than one correct answer.
 - `true_false` questions need exactly two answers and exactly one correct answer.
+- For large quizzes, prefer compact aliases: `q`/`a` for question prompt/answers, `t`/`c`/`e` for answer text/correct/explanation, and `mc`/`tf` for type values.
+- `correct` and `c` can be omitted for false answers.
 - `targetGradePercent` is optional and defaults to 70.
 - `theme` is optional. Available themes are `aurora`, `paper`, `sakura`, `ember`, `circuit`, and `harbor`.
 - Question text, answer text, and explanations can include LaTeX math such as `$x = 2$`.
+- Keep answer choices fair and non-signaling: similar length, detail, specificity, tone, grammar, and formatting; distractors should be plausible instead of obviously weaker than the correct answer.
 - Do not depend on answer letters. The server shuffles answer order.
 
 ## Auth Modes

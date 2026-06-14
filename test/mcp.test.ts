@@ -11,16 +11,29 @@ describe("mcp endpoint", () => {
     expect(tool.name).toBe("render_inline_quiz");
     expect(tool.securitySchemes).toEqual([{ type: "noauth" }]);
     expect(tool.annotations.readOnlyHint).toBe(true);
-    expect(tool._meta.ui.resourceUri).toBe("ui://widget/inline-quiz-v5.html");
-    expect(tool._meta["openai/outputTemplate"]).toBe("ui://widget/inline-quiz-v5.html");
-    expect(tool.description).toContain("single call");
+    expect(tool._meta.ui.resourceUri).toBe("ui://widget/inline-quiz-v10.html");
+    expect(tool._meta["openai/outputTemplate"]).toBe("ui://widget/inline-quiz-v10.html");
+    expect(tool.description).toContain("one call");
     expect(tool.description).toContain("do not refuse");
-    expect(tool.description).toContain("may mark more than one");
-    expect(tool.description).toContain("true/false questions must mark exactly one");
+    expect(tool.description).toContain("may mark multiple correct");
+    expect(tool.description).toContain("true_false exactly one");
+    expect(tool.description).toContain("compact input");
+    expect(tool.description).toContain("omit c/correct when false");
+    expect(tool.description).toContain("fair/non-signaling");
     expect(tool.description).toContain("LaTeX");
-    expect(tool.description).toContain("theme");
+    expect(tool.description).toContain("themes");
     expect(tool.inputSchema.properties.questions.maxItems).toBe(MAX_QUESTIONS);
     expect(tool.inputSchema.properties.questions.items.properties.prompt.description).toContain("LaTeX");
+    expect(tool.inputSchema.properties.questions.items.properties.q.description).toContain("Compact alias");
+    expect(tool.inputSchema.properties.questions.items.properties.a.description).toContain("Compact alias");
+    expect(tool.inputSchema.properties.questions.items.properties.answers.description).toContain("parallel in length");
+    expect(tool.inputSchema.properties.questions.items.properties.answers.items.anyOf).toEqual([
+      { required: ["text"] },
+      { required: ["t"] }
+    ]);
+    expect(tool.inputSchema.properties.questions.items.properties.answers.items.required).toBeUndefined();
+    expect(tool.inputSchema.properties.questions.items.properties.answers.items.properties.c.description).toContain("omit when false");
+    expect(tool.inputSchema.properties.questions.items.properties.answers.items.properties.text.description).toContain("not guessable from style");
     expect(tool.inputSchema.properties.targetGradePercent).toBeDefined();
     expect(tool.inputSchema.properties.theme.enum).toEqual([...QUIZ_THEME_IDS]);
   });
@@ -33,21 +46,25 @@ describe("mcp endpoint", () => {
     });
     const body = await response.json() as any;
 
-    expect(body.result.instructions).toContain("Large quiz counts are supported");
-    expect(body.result.instructions).toContain("not a reason to refuse");
-    expect(body.result.instructions).toContain("mark one or more answers correct");
-    expect(body.result.instructions).toContain("true_false questions, mark exactly one");
+    expect(body.result.instructions).toContain("large counts are supported");
+    expect(body.result.instructions).toContain("not a refusal reason");
+    expect(body.result.instructions).toContain("one or more correct choices");
+    expect(body.result.instructions).toContain("true_false needs exactly one");
+    expect(body.result.instructions).toContain("compact input");
+    expect(body.result.instructions).toContain("omit c/correct when false");
+    expect(body.result.instructions).toContain("fair/non-signaling");
+    expect(body.result.instructions).toContain("all/none-of-the-above shortcuts");
     expect(body.result.instructions).toContain(`more than ${MAX_QUESTIONS}`);
     expect(body.result.instructions).toContain("LaTeX");
-    expect(body.result.instructions).toContain("optional theme field");
+    expect(body.result.instructions).toContain("theme may be");
   });
 
   it("reads the widget resource with mcp-app mime type and CSP metadata", async () => {
-    const response = await rpc("resources/read", { uri: "ui://widget/inline-quiz-v5.html" });
+    const response = await rpc("resources/read", { uri: "ui://widget/inline-quiz-v10.html" });
     const body = await response.json() as any;
     const content = body.result.contents[0];
 
-    expect(content.uri).toBe("ui://widget/inline-quiz-v5.html");
+    expect(content.uri).toBe("ui://widget/inline-quiz-v10.html");
     expect(content.mimeType).toBe("text/html;profile=mcp-app");
     expect(content.text).toContain("quiz-root");
     expect(content._meta.ui.csp.connectDomains).toEqual([]);
@@ -57,12 +74,17 @@ describe("mcp endpoint", () => {
     expect(content._meta["openai/widgetDescription"]).toContain("interactive quiz");
   });
 
-  it("keeps old widget resource URIs readable while new metadata points to v5", async () => {
+  it("keeps old widget resource URIs readable while new metadata points to v10", async () => {
     for (const uri of [
       "ui://widget/inline-quiz-v1.html",
       "ui://widget/inline-quiz-v2.html",
       "ui://widget/inline-quiz-v3.html",
-      "ui://widget/inline-quiz-v4.html"
+      "ui://widget/inline-quiz-v4.html",
+      "ui://widget/inline-quiz-v5.html",
+      "ui://widget/inline-quiz-v6.html",
+      "ui://widget/inline-quiz-v7.html",
+      "ui://widget/inline-quiz-v8.html",
+      "ui://widget/inline-quiz-v9.html"
     ]) {
       const response = await rpc("resources/read", { uri });
       const body = await response.json() as any;
@@ -99,10 +121,40 @@ describe("mcp endpoint", () => {
     expect(body.result._meta.answerKey).toBeDefined();
     expect(body.result._meta.retakeArguments.title).toBe("Smoke quiz");
     expect(body.result._meta.retakeArguments.theme).toBe("paper");
+    expect(body.result._meta.retakeArguments.questions[0].q).toBe("Which option is correct?");
+    expect(body.result._meta.retakeArguments.questions[0].a).toEqual([
+      { t: "Right", c: true },
+      { t: "Wrong" }
+    ]);
     expect(JSON.stringify(body.result.structuredContent)).not.toContain("answerKey");
     for (const choice of body.result.structuredContent.questions[0].choices) {
       expect(choice).not.toHaveProperty("correct");
     }
+  });
+
+  it("accepts compact quiz input aliases and omitted false flags", async () => {
+    const response = await rpc("tools/call", {
+      name: "render_inline_quiz",
+      arguments: {
+        title: "Compact quiz",
+        questions: [
+          {
+            q: "Which number is prime?",
+            type: "mc",
+            a: [
+              { t: "2", c: true, e: "2 has exactly two positive factors." },
+              { t: "4" }
+            ]
+          }
+        ]
+      }
+    });
+    const body = await response.json() as any;
+
+    expect(body.result.structuredContent.title).toBe("Compact quiz");
+    expect(body.result.structuredContent.questions[0].prompt).toBe("Which number is prime?");
+    expect(body.result.structuredContent.questions[0].choices.map((choice: any) => choice.text).sort()).toEqual(["2", "4"]);
+    expect(body.result._meta.answerKey).toBeDefined();
   });
 
   it("allows separate quiz calls without merging or dropping the second result", async () => {

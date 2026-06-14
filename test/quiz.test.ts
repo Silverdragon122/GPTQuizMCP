@@ -81,6 +81,38 @@ describe("quiz builder", () => {
     expect(quiz.retakeInput.questions).toHaveLength(50);
   });
 
+  it("accepts compact aliases and omitted false answer flags", () => {
+    const normalized = normalizeQuizInput({
+      questions: [
+        {
+          q: "Which number is prime?",
+          type: "mc",
+          e: "A prime has exactly two positive factors.",
+          a: [
+            { t: "2", c: true, e: "2 is prime." },
+            { t: "4" }
+          ]
+        },
+        {
+          q: "The sky is blue on a clear day.",
+          type: "tf",
+          a: [
+            { t: "True", c: true },
+            { t: "False" }
+          ]
+        }
+      ]
+    });
+
+    expect(normalized.questions[0]?.prompt).toBe("Which number is prime?");
+    expect(normalized.questions[0]?.type).toBe("multiple_choice");
+    expect(normalized.questions[0]?.explanation).toBe("A prime has exactly two positive factors.");
+    expect(normalized.questions[0]?.answers[0]).toMatchObject({ text: "2", correct: true });
+    expect(normalized.questions[0]?.answers[1]).toMatchObject({ text: "4", correct: false });
+    expect(normalized.questions[1]?.type).toBe("true_false");
+    expect(normalized.retakeInput.questions[0]?.answers[1]?.correct).toBe(false);
+  });
+
   it("keeps backward-compatible passing score as a target-grade alias", () => {
     const normalized = normalizeQuizInput({
       passingScorePercent: 90,

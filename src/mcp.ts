@@ -5,7 +5,8 @@ import {
   MAX_TITLE_LENGTH,
   MAX_TOTAL_TEXT_CHARS,
   QUIZ_THEME_IDS,
-  QuizInputError
+  QuizInputError,
+  type RenderQuizInput
 } from "./quiz";
 import { QUIZ_WIDGET_HTML } from "./widget";
 
@@ -52,15 +53,24 @@ const APP_NAME = "quiz-mcp";
 const APP_VERSION = "0.1.0";
 const LATEST_PROTOCOL_VERSION = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]);
-const TEMPLATE_URI = "ui://widget/inline-quiz-v5.html";
+const TEMPLATE_URI = "ui://widget/inline-quiz-v10.html";
 const LEGACY_TEMPLATE_URIS = new Set([
   "ui://widget/inline-quiz-v1.html",
   "ui://widget/inline-quiz-v2.html",
   "ui://widget/inline-quiz-v3.html",
-  "ui://widget/inline-quiz-v4.html"
+  "ui://widget/inline-quiz-v4.html",
+  "ui://widget/inline-quiz-v5.html",
+  "ui://widget/inline-quiz-v6.html",
+  "ui://widget/inline-quiz-v7.html",
+  "ui://widget/inline-quiz-v8.html",
+  "ui://widget/inline-quiz-v9.html"
 ]);
 const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 const TOOL_NAME = "render_inline_quiz";
+const ANSWER_QUALITY_INSTRUCTIONS =
+  "Answer choices must be fair/non-signaling: correct choices must not be noticeably longer, more detailed, more specific, or more qualified than distractors. Keep choices parallel in length, grammar, specificity, tone, and formatting; avoid silly distractors, answer-only keywords, avoidable always/never clues, and all/none-of-the-above shortcuts.";
+const COMPACT_TOOL_CALL_INSTRUCTIONS =
+  "For long quizzes, prefer compact input: question q/a/e for prompt/answers/explanation, answer t/c/e for text/correct/explanation, type values mc/tf, and omit c/correct when false.";
 const MAX_REQUEST_BYTES = 1_250_000;
 const MAX_BATCH_REQUESTS = 20;
 const MAX_BEARER_TOKEN_CHARS = 8192;
@@ -318,7 +328,7 @@ function initializeResult(params: unknown) {
       version: APP_VERSION
     },
     instructions:
-      `Use render_inline_quiz when the user asks for an interactive quiz. Large quiz counts are supported and are not a reason to refuse, apologize, or say the request is unreasonable. For one requested quiz, make one tool call containing all requested questions up to ${MAX_QUESTIONS}; do not split a 50-question quiz into separate 30 and 20 question calls. If the user asks for more than ${MAX_QUESTIONS} questions, render ${MAX_QUESTIONS} questions in one tool call and briefly say that is the current per-quiz limit; offer to make another separate quiz with new questions if they want more. Multiple tool calls are allowed when the user asks for separate quizzes or asks for another new quiz. Pass explicit questions and answers. For multiple_choice questions, mark one or more answers correct when multiple choices should be accepted; for true_false questions, mark exactly one answer correct. Never describe answers by letter because the server shuffles question order and answer positions. Questions, answers, and explanations may include LaTeX for math or math-adjacent material using $...$, $$...$$, \\(...\\), or \\[...\\]; keep delimiters balanced and include enough surrounding words for accessibility. The optional targetGradePercent field sets the target grade, defaults to ${DEFAULT_TARGET_GRADE_PERCENT}, and may be explained to users naturally as a target score like 80%. The optional theme field can set the quiz look to one of: ${QUIZ_THEME_IDS.join(", ")}.`
+      `Use render_inline_quiz for interactive quizzes. One quiz = one tool call with 1-${MAX_QUESTIONS} questions; large counts are supported and not a refusal reason. If asked for more than ${MAX_QUESTIONS}, render ${MAX_QUESTIONS} and offer another quiz. multiple_choice needs one or more correct choices; true_false needs exactly one. ${COMPACT_TOOL_CALL_INSTRUCTIONS} ${ANSWER_QUALITY_INSTRUCTIONS} Never describe answers by letter because order is shuffled. LaTeX is allowed with balanced $...$, $$...$$, \\(...\\), or \\[...\\]. targetGradePercent defaults to ${DEFAULT_TARGET_GRADE_PERCENT}; theme may be ${QUIZ_THEME_IDS.join(", ")}.`
   };
 }
 
@@ -339,8 +349,29 @@ function callTool(params: unknown) {
     ],
     _meta: {
       ...meta,
-      retakeArguments: retakeInput
+      retakeArguments: compactRetakeArguments(retakeInput)
     }
+  };
+}
+
+function compactRetakeArguments(input: RenderQuizInput) {
+  return {
+    title: input.title,
+    ...(input.shuffleQuestions === false ? { shuffleQuestions: false } : {}),
+    ...(input.targetGradePercent === DEFAULT_TARGET_GRADE_PERCENT
+      ? {}
+      : { targetGradePercent: input.targetGradePercent }),
+    ...(input.theme ? { theme: input.theme } : {}),
+    questions: input.questions.map((question) => ({
+      q: question.prompt,
+      type: question.type === "true_false" ? "tf" : "mc",
+      ...(question.explanation ? { e: question.explanation } : {}),
+      a: question.answers.map((answer) => ({
+        t: answer.text,
+        ...(answer.correct ? { c: true } : {}),
+        ...(answer.explanation ? { e: answer.explanation } : {})
+      }))
+    }))
   };
 }
 
@@ -387,7 +418,7 @@ function toolDescriptor(env: Env = {}) {
     name: TOOL_NAME,
     title: "Render inline quiz",
     description:
-      `Render a minimal interactive quiz in ChatGPT. Provide 1-${MAX_QUESTIONS} questions in a single call for one quiz. Large requested counts are allowed; do not refuse solely because the quiz is big. If a user asks for more than ${MAX_QUESTIONS}, render ${MAX_QUESTIONS} now and offer another separate quiz if they want more. Each question must have 2-6 possible answers. Multiple-choice questions must have at least one answer marked correct and may mark more than one acceptable answer correct; true/false questions must mark exactly one answer correct. Supports true_false plus single-select and multi-select multiple_choice. Use LaTeX delimiters ($...$, $$...$$, \\(...\\), \\[...\\]) when math notation helps. targetGradePercent optionally sets the score target, defaulting to ${DEFAULT_TARGET_GRADE_PERCENT}. theme optionally sets the bundled visual theme (${QUIZ_THEME_IDS.join(", ")}). The server shuffles question order and answer positions, so never refer to answer letters.`,
+      `Render an interactive quiz. One quiz = one call with 1-${MAX_QUESTIONS} questions; do not refuse large counts. If asked for more than ${MAX_QUESTIONS}, render ${MAX_QUESTIONS} and offer another quiz. Questions need 2-6 answers; multiple_choice may mark multiple correct, true_false exactly one. ${COMPACT_TOOL_CALL_INSTRUCTIONS} ${ANSWER_QUALITY_INSTRUCTIONS} Supports LaTeX, targetGradePercent, and themes (${QUIZ_THEME_IDS.join(", ")}). Order is shuffled, so never refer to answer letters.`,
     inputSchema: quizInputSchema(),
     outputSchema: quizOutputSchema(),
     annotations: {
@@ -856,6 +887,56 @@ function isJsonRpcId(value: unknown): value is JsonRpcId {
 }
 
 function quizInputSchema() {
+  const answerItemSchema = {
+    type: "object",
+    additionalProperties: false,
+    anyOf: [{ required: ["text"] }, { required: ["t"] }],
+    properties: {
+      text: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description:
+          "Answer text. Keep choices comparable so the correct answer is not guessable from style. Alias: t."
+      },
+      t: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "Compact alias for answer text."
+      },
+      correct: {
+        type: "boolean",
+        description:
+          "True for correct choices. Omit when false. Multiple_choice may have more than one true; true_false exactly one. Alias: c."
+      },
+      c: {
+        type: "boolean",
+        description: "Compact alias for correct; omit when false."
+      },
+      explanation: {
+        type: "string",
+        minLength: 1,
+        maxLength: 700,
+        description: "Optional choice explanation. Alias: e. LaTeX is allowed."
+      },
+      e: {
+        type: "string",
+        minLength: 1,
+        maxLength: 700,
+        description: "Compact alias for explanation."
+      }
+    }
+  };
+  const answerArraySchema = {
+    type: "array",
+    minItems: 2,
+    maxItems: 6,
+    description:
+      "Answer choices. Keep correct and incorrect choices parallel in length, detail, specificity, tone, grammar, and formatting.",
+    items: answerItemSchema
+  };
+
   return {
     type: "object",
     additionalProperties: false,
@@ -865,92 +946,79 @@ function quizInputSchema() {
         type: "string",
         minLength: 1,
         maxLength: MAX_TITLE_LENGTH,
-        description: "Short quiz title. Defaults to Quick quiz."
+        description: "Quiz title; defaults to Quick quiz."
       },
       shuffleQuestions: {
         type: "boolean",
-        description: "Whether the server should randomize question order. Defaults to true."
+        description: "Randomize question order; defaults to true."
       },
       targetGradePercent: {
         type: "integer",
         minimum: 0,
         maximum: 100,
-        description:
-          `Optional target grade the widget uses for final scoring copy. Defaults to ${DEFAULT_TARGET_GRADE_PERCENT}. You can tell the user you can set this, for example an 80% target.`
+        description: `Optional score target; defaults to ${DEFAULT_TARGET_GRADE_PERCENT}.`
       },
       passingScorePercent: {
         type: "integer",
         minimum: 0,
         maximum: 100,
-        description:
-          "Backward-compatible alias for targetGradePercent. Prefer targetGradePercent in new calls."
+        description: "Backward-compatible alias for targetGradePercent."
       },
       theme: {
         type: "string",
         enum: [...QUIZ_THEME_IDS],
-        description:
-          "Optional bundled widget theme. Use when the user asks for a specific look. The user can also change this later inside the widget, and the widget stores that preference locally when browser storage is available."
+        description: "Optional bundled widget theme."
       },
       questions: {
         type: "array",
         minItems: 1,
         maxItems: MAX_QUESTIONS,
         description:
-          `All questions for one quiz. Large counts are valid up to ${MAX_QUESTIONS}; do not refuse just because the requested quiz is long. Do not split one quiz across calls unless the user explicitly wants separate quizzes. Combined quiz text must stay under ${MAX_TOTAL_TEXT_CHARS} characters.`,
+          `All questions for one quiz. Large counts are valid up to ${MAX_QUESTIONS}; do not split one quiz across calls. Combined quiz text must stay under ${MAX_TOTAL_TEXT_CHARS} characters. For long quizzes, prefer q/a/t/c/e aliases and omit false correct flags.`,
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["prompt", "answers"],
+          anyOf: [
+            { required: ["prompt", "answers"] },
+            { required: ["prompt", "a"] },
+            { required: ["q", "answers"] },
+            { required: ["q", "a"] }
+          ],
           properties: {
             prompt: {
               type: "string",
               minLength: 1,
               maxLength: 700,
               description:
-                "Question text. May include balanced LaTeX math delimiters such as $...$, $$...$$, \\(...\\), or \\[...\\]."
+                "Question text. May include balanced LaTeX math delimiters. Alias: q."
+            },
+            q: {
+              type: "string",
+              minLength: 1,
+              maxLength: 700,
+              description: "Compact alias for prompt."
             },
             type: {
               type: "string",
-              enum: ["multiple_choice", "true_false"],
-              description: "Use true_false only for exactly two answer choices."
+              enum: ["multiple_choice", "true_false", "mc", "tf"],
+              description: "Optional question type. Compact values: mc, tf."
             },
             explanation: {
               type: "string",
               minLength: 1,
               maxLength: 700,
-              description:
-                "Optional overall explanation for the question after the user answers. May include balanced LaTeX math delimiters."
+              description: "Optional question explanation. Alias: e. LaTeX is allowed."
             },
-            answers: {
-              type: "array",
-              minItems: 2,
-              maxItems: 6,
-              items: {
-                type: "object",
-                additionalProperties: false,
-                required: ["text", "correct"],
-                properties: {
-                  text: {
-                    type: "string",
-                    minLength: 1,
-                    maxLength: 280,
-                    description:
-                      "Answer text. May include balanced inline LaTeX math such as $x = 2$ or \\(x = 2\\)."
-                  },
-                  correct: {
-                    type: "boolean",
-                    description:
-                      "For multiple_choice questions, one or more answers may be true. For true_false questions, exactly one answer must be true."
-                  },
-                  explanation: {
-                    type: "string",
-                    minLength: 1,
-                    maxLength: 700,
-                    description:
-                      "Optional explanation for this specific answer choice. For the correct answer, explain why it is right. For a wrong answer, explain why it is tempting or wrong. May include balanced LaTeX math delimiters."
-                  }
-                }
-              }
+            e: {
+              type: "string",
+              minLength: 1,
+              maxLength: 700,
+              description: "Compact alias for explanation."
+            },
+            answers: answerArraySchema,
+            a: {
+              ...answerArraySchema,
+              description: "Compact alias for answers. Same rules as answers."
             }
           }
         }

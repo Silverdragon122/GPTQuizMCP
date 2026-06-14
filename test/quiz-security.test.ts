@@ -37,6 +37,20 @@ describe("quiz input security", () => {
     expect(getterCalled).toBe(false);
   });
 
+  it("rejects accessor compact aliases without invoking hostile getters", () => {
+    let getterCalled = false;
+    const question = Object.defineProperty({ a: [{ t: "A", c: true }, { t: "B" }] }, "q", {
+      enumerable: true,
+      get() {
+        getterCalled = true;
+        return "Pick one.";
+      }
+    });
+
+    expect(() => normalizeQuizInput({ questions: [question] })).toThrow("questions[0].q must be a data property.");
+    expect(getterCalled).toBe(false);
+  });
+
   it("rejects inherited quiz properties", () => {
     const input = Object.create({ questions: [validQuestion] }) as Record<string, unknown>;
 

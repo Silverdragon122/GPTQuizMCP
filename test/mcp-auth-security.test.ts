@@ -13,7 +13,7 @@ describe("mcp auth security", () => {
     const listBody = await listResponse.json() as any;
 
     expect(listBody.result.tools[0].securitySchemes).toEqual([{ type: "noauth" }]);
-    expect(listBody.result.tools[0]._meta["openai/outputTemplate"]).toBe("ui://widget/inline-quiz-v5.html");
+    expect(listBody.result.tools[0]._meta["openai/outputTemplate"]).toBe("ui://widget/inline-quiz-v10.html");
 
     const callResponse = await mcp({
       jsonrpc: "2.0",

@@ -1,16 +1,23 @@
 export type QuestionType = "multiple_choice" | "true_false";
+export type QuestionTypeInput = QuestionType | "mc" | "tf";
 
 export type ChoiceInput = {
   text: string;
+  t?: string;
   correct?: boolean;
+  c?: boolean;
   explanation?: string;
+  e?: string;
 };
 
 export type QuestionInput = {
   prompt: string;
-  type?: QuestionType;
+  q?: string;
+  type?: QuestionTypeInput;
   answers: ChoiceInput[];
+  a?: ChoiceInput[];
   explanation?: string;
+  e?: string;
 };
 
 export type RenderQuizInput = {
@@ -255,11 +262,17 @@ export function secureRandomInt(maxExclusive: number): number {
 function normalizeQuestion(rawQuestion: unknown, index: number): NormalizedQuestion {
   const question = assertRecord(rawQuestion, `Question ${index + 1} must be an object.`);
   const prompt = requiredString(
-    readOwnDataProperty(question, "prompt", `questions[${index}].prompt`),
+    readOwnDataPropertyAlias(question, "prompt", "q", `questions[${index}].prompt`, `questions[${index}].q`),
     `questions[${index}].prompt`,
     MAX_PROMPT_LENGTH
   );
-  const rawAnswers = readOwnDataProperty(question, "answers", `questions[${index}].answers`);
+  const rawAnswers = readOwnDataPropertyAlias(
+    question,
+    "answers",
+    "a",
+    `questions[${index}].answers`,
+    `questions[${index}].a`
+  );
 
   const rawAnswerArray = assertArray(rawAnswers, `Question ${index + 1} must include an answers array.`);
   const answerCount = readArrayLength(
@@ -271,14 +284,11 @@ function normalizeQuestion(rawQuestion: unknown, index: number): NormalizedQuest
     throw new QuizInputError(`Question ${index + 1} must include ${MIN_ANSWERS}-${MAX_ANSWERS} answers.`);
   }
 
-  const explicitType = readOwnDataProperty(question, "type", `questions[${index}].type`);
+  const explicitType = normalizeQuestionType(readOwnDataProperty(question, "type", `questions[${index}].type`));
   const answers = readDenseArray(rawAnswerArray, `questions[${index}].answers`, answerCount).map(
     (rawAnswer, answerIndex) => normalizeAnswer(rawAnswer, index, answerIndex)
   );
   const type = explicitType === undefined ? inferQuestionType(answers) : explicitType;
-  if (type !== "multiple_choice" && type !== "true_false") {
-    throw new QuizInputError(`Question ${index + 1} type must be multiple_choice or true_false.`);
-  }
   if (type === "true_false" && answers.length !== 2) {
     throw new QuizInputError(`Question ${index + 1} is true_false and must include exactly two answers.`);
   }
@@ -296,7 +306,13 @@ function normalizeQuestion(rawQuestion: unknown, index: number): NormalizedQuest
     type,
     answers,
     explanation: optionalString(
-      readOwnDataProperty(question, "explanation", `questions[${index}].explanation`),
+      readOwnDataPropertyAlias(
+        question,
+        "explanation",
+        "e",
+        `questions[${index}].explanation`,
+        `questions[${index}].e`
+      ),
       `questions[${index}].explanation`,
       MAX_EXPLANATION_LENGTH
     )
@@ -313,6 +329,10 @@ function normalizeAnswer(rawAnswer: unknown, questionIndex: number, answerIndex:
     answer,
     "correct",
     `questions[${questionIndex}].answers[${answerIndex}].correct`
+  ) ?? readOwnDataProperty(
+    answer,
+    "c",
+    `questions[${questionIndex}].answers[${answerIndex}].c`
   );
 
   if (correct !== undefined && typeof correct !== "boolean") {
@@ -323,16 +343,24 @@ function normalizeAnswer(rawAnswer: unknown, questionIndex: number, answerIndex:
 
   return {
     text: requiredString(
-      readOwnDataProperty(answer, "text", `questions[${questionIndex}].answers[${answerIndex}].text`),
+      readOwnDataPropertyAlias(
+        answer,
+        "text",
+        "t",
+        `questions[${questionIndex}].answers[${answerIndex}].text`,
+        `questions[${questionIndex}].answers[${answerIndex}].t`
+      ),
       `questions[${questionIndex}].answers[${answerIndex}].text`,
       MAX_ANSWER_LENGTH
     ),
     correct: correct === true,
     explanation: optionalString(
-      readOwnDataProperty(
+      readOwnDataPropertyAlias(
         answer,
         "explanation",
-        `questions[${questionIndex}].answers[${answerIndex}].explanation`
+        "e",
+        `questions[${questionIndex}].answers[${answerIndex}].explanation`,
+        `questions[${questionIndex}].answers[${answerIndex}].e`
       ),
       `questions[${questionIndex}].answers[${answerIndex}].explanation`,
       MAX_EXPLANATION_LENGTH
@@ -347,6 +375,20 @@ function inferQuestionType(answers: NormalizedChoice[]): QuestionType {
 
   const normalized = new Set(answers.map((answer) => answer.text.trim().toLowerCase()));
   return normalized.has("true") && normalized.has("false") ? "true_false" : "multiple_choice";
+}
+
+function normalizeQuestionType(value: unknown): QuestionType | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "multiple_choice" || value === "mc") {
+    return "multiple_choice";
+  }
+  if (value === "true_false" || value === "tf") {
+    return "true_false";
+  }
+
+  throw new QuizInputError("Question type must be multiple_choice, true_false, mc, or tf.");
 }
 
 function normalizeTargetGrade(value: unknown): number {
@@ -414,6 +456,17 @@ function readOwnDataProperty(record: Record<string, unknown>, key: string, path:
   }
 
   return descriptor.value;
+}
+
+function readOwnDataPropertyAlias(
+  record: Record<string, unknown>,
+  key: string,
+  alias: string,
+  path: string,
+  aliasPath: string
+): unknown {
+  const value = readOwnDataProperty(record, key, path);
+  return value === undefined ? readOwnDataProperty(record, alias, aliasPath) : value;
 }
 
 function assertArray(value: unknown, message: string): readonly unknown[] {
