@@ -74,30 +74,12 @@ describe("mcp endpoint", () => {
     expect(content._meta["openai/widgetDescription"]).toContain("interactive quiz");
   });
 
-  it("keeps old widget resource URIs readable while new metadata points to v14", async () => {
-    for (const uri of [
-      "ui://widget/inline-quiz-v1.html",
-      "ui://widget/inline-quiz-v2.html",
-      "ui://widget/inline-quiz-v3.html",
-      "ui://widget/inline-quiz-v4.html",
-      "ui://widget/inline-quiz-v5.html",
-      "ui://widget/inline-quiz-v6.html",
-      "ui://widget/inline-quiz-v7.html",
-      "ui://widget/inline-quiz-v8.html",
-      "ui://widget/inline-quiz-v9.html",
-      "ui://widget/inline-quiz-v10.html",
-      "ui://widget/inline-quiz-v11.html",
-      "ui://widget/inline-quiz-v12.html",
-      "ui://widget/inline-quiz-v13.html"
-    ]) {
-      const response = await rpc("resources/read", { uri });
-      const body = await response.json() as any;
-      const content = body.result.contents[0];
+  it("rejects unknown widget resource URIs", async () => {
+    const response = await rpc("resources/read", { uri: "ui://widget/not-current.html" });
+    const body = await response.json() as any;
 
-      expect(content.uri).toBe(uri);
-      expect(content.mimeType).toBe("text/html;profile=mcp-app");
-      expect(content.text).toContain("quiz-root");
-    }
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain("Unknown resource");
   });
 
   it("calls the quiz tool and keeps the answer key in hidden metadata", async () => {

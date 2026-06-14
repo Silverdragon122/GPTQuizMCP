@@ -1347,7 +1347,6 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     if (!snapshot) {
       if (options?.clear === true) {
         writeProgressClearMarker(quiz.quizId);
-        writeHostWidgetState({ privateContent: defaultState(quiz.quizId) });
       }
       return;
     }
@@ -1365,7 +1364,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   }
 
   function writeHostWidgetState(snapshot) {
-    if (window.__QUIZ_ENABLE_WIDGET_STATE__ !== true || typeof getOpenAI()?.setWidgetState !== "function") {
+    if (window.__QUIZ_DISABLE_WIDGET_STATE__ === true || typeof getOpenAI()?.setWidgetState !== "function") {
       return;
     }
     try {
@@ -1377,8 +1376,14 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
 
   function compactStateForPersistence(candidate, options) {
     const normalized = normalizeStateForCurrentQuiz(candidate);
+    if (!normalized || !normalized.quizId) {
+      return null;
+    }
+    if (options?.clear === true) {
+      return null;
+    }
     const meaningful = hasMeaningfulQuizState(normalized);
-    if (!normalized || !normalized.quizId || (!meaningful && (options?.clear || !options?.force))) {
+    if (!meaningful && !options?.force) {
       return null;
     }
 
@@ -1449,6 +1454,8 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
       Object.keys(value?.revealed || {}).length > 0 ||
       normalizeThemeId(value?.theme) !== null ||
       value?.review === true ||
+      value?.reviewMode !== "all" ||
+      value?.studyMode !== "quiz" ||
       value?.showResult === true ||
       value?.phase === "feedback" ||
       value?.phase === "review" ||
@@ -1549,7 +1556,9 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
       // Progress clearing is best-effort inside sandboxed widget hosts.
     }
     if (serialized) {
+      lastPersistedStateJson = serialized;
       writeLocalProgressState(marker, serialized);
+      writeHostWidgetState({ privateContent: marker });
     }
   }
 
@@ -2775,6 +2784,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     if (isBusy) return;
     const openai = getOpenAI();
     if (typeof openai?.callTool === "function" && retakeArguments) {
+      persistWidgetState({ clear: true, force: true });
       isBusy = true;
       statusText = "Starting a new attempt.";
       renderSafely();
@@ -2871,6 +2881,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   }
 
   function makeAnotherQuiz() {
+    persistWidgetState({ clear: true, force: true });
     const currentQuestions = quiz?.questions || [];
     const sampledQuestions = currentQuestions.slice(0, 20);
     const omittedCount = Math.max(0, currentQuestions.length - sampledQuestions.length);

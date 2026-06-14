@@ -54,21 +54,6 @@ const APP_VERSION = "0.1.0";
 const LATEST_PROTOCOL_VERSION = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]);
 const TEMPLATE_URI = "ui://widget/inline-quiz-v14.html";
-const LEGACY_TEMPLATE_URIS = new Set([
-  "ui://widget/inline-quiz-v1.html",
-  "ui://widget/inline-quiz-v2.html",
-  "ui://widget/inline-quiz-v3.html",
-  "ui://widget/inline-quiz-v4.html",
-  "ui://widget/inline-quiz-v5.html",
-  "ui://widget/inline-quiz-v6.html",
-  "ui://widget/inline-quiz-v7.html",
-  "ui://widget/inline-quiz-v8.html",
-  "ui://widget/inline-quiz-v9.html",
-  "ui://widget/inline-quiz-v10.html",
-  "ui://widget/inline-quiz-v11.html",
-  "ui://widget/inline-quiz-v12.html",
-  "ui://widget/inline-quiz-v13.html"
-]);
 const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 const TOOL_NAME = "render_inline_quiz";
 const ANSWER_QUALITY_INSTRUCTIONS =
@@ -382,7 +367,7 @@ function compactRetakeArguments(input: RenderQuizInput) {
 function readResource(params: unknown, request: Request, env: Env) {
   const resourceRequest = asRecord(params, "Resource read params must be an object.");
   const requestedUri = typeof resourceRequest.uri === "string" ? resourceRequest.uri : "";
-  if (requestedUri !== TEMPLATE_URI && !LEGACY_TEMPLATE_URIS.has(requestedUri)) {
+  if (requestedUri !== TEMPLATE_URI) {
     throw new QuizInputError(`Unknown resource: ${String(resourceRequest.uri)}`);
   }
 

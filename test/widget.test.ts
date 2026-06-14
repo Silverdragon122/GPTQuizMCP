@@ -235,9 +235,9 @@ describe("quiz widget hydration", () => {
     expect(openai.widgetState).toBeNull();
   });
 
-  it("does not call host widget-state persistence unless the opt-in flag is present", () => {
+  it("uses host widget-state persistence when the bridge is available", () => {
     const storage = new TestStorage();
-    const toolResult = makeToolResult("Unset host persistence quiz", "quiz_unset_host_persist");
+    const toolResult = makeToolResult("Default host persistence quiz", "quiz_default_host_persist");
     const { openai, root } = mountWidget(
       {
         toolOutput: toolResult.structuredContent,
@@ -248,8 +248,15 @@ describe("quiz widget hydration", () => {
 
     findButtonContainingText(root, "Correct")!.click();
 
-    expect(openai.widgetState).toBeNull();
-    expect(storage.getItem("quiz-mcp-progress:quiz_unset_host_persist")).toContain('"answers"');
+    expect(openai.widgetState).toMatchObject({
+      privateContent: {
+        quizId: "quiz_default_host_persist",
+        answers: {
+          q_0: "a_0_0"
+        }
+      }
+    });
+    expect(storage.getItem("quiz-mcp-progress:quiz_default_host_persist")).toContain('"answers"');
   });
 
   it("restores compact progress from local fallback storage", () => {
@@ -529,6 +536,11 @@ describe("quiz widget hydration", () => {
         }
       }
     });
+    expect(storageSnapshot(openai.widgetState)).toMatchObject({
+      studyMode: "learn",
+      review: true,
+      phase: "review"
+    });
 
     findButtonByText(root, "Flag")!.click();
     expect(openai.widgetState).toMatchObject({
@@ -537,6 +549,90 @@ describe("quiz widget hydration", () => {
           q_0: true
         }
       }
+    });
+  });
+
+  it("persists learn mode to local fallback storage", () => {
+    const storage = new TestStorage();
+    const toolResult = makeToolResult("Learn memory quiz", "quiz_learn_memory");
+    const { root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta }
+      },
+      { localStorage: storage }
+    );
+
+    findButtonContainingText(root, "Correct")!.click();
+    findButtonByText(root, "Show score")!.click();
+    findButtonByText(root, "Learn")!.click();
+
+    expect(JSON.parse(storage.getItem("quiz-mcp-progress:quiz_learn_memory") || "{}")).toMatchObject({
+      quizId: "quiz_learn_memory",
+      review: true,
+      studyMode: "learn",
+      phase: "review"
+    });
+  });
+
+  it("clears saved result state before starting another quiz", () => {
+    const messages: any[] = [];
+    const storage = new TestStorage();
+    const toolResult = makeToolResult("New quiz memory", "quiz_new_memory");
+    const { openai, root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta },
+        sendFollowUpMessage(message: unknown) {
+          messages.push(message);
+        }
+      },
+      { localStorage: storage }
+    );
+
+    findButtonContainingText(root, "Correct")!.click();
+    findButtonByText(root, "Show score")!.click();
+    findButtonByText(root, "New quiz")!.click();
+
+    expect(messages).toHaveLength(1);
+    expect(storageSnapshot(openai.widgetState)).toMatchObject({
+      quizId: "quiz_new_memory",
+      cleared: true
+    });
+    expect(JSON.parse(storage.getItem("quiz-mcp-progress:quiz_new_memory") || "{}")).toMatchObject({
+      quizId: "quiz_new_memory",
+      cleared: true
+    });
+  });
+
+  it("clears saved result state before redoing a quiz through the tool bridge", () => {
+    const storage = new TestStorage();
+    const toolResult = makeToolResult("Redo memory", "quiz_redo_memory");
+    let callCount = 0;
+    const { openai, root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta },
+        async callTool() {
+          callCount += 1;
+          return makeToolResult("Redo memory", "quiz_redo_memory_next");
+        }
+      },
+      { localStorage: storage }
+    );
+
+    findButtonContainingText(root, "Correct")!.click();
+    findButtonByText(root, "Show score")!.click();
+    findButtonByText(root, "Try again")!.click();
+
+    expect(callCount).toBe(1);
+    expect(storageSnapshot(openai.widgetState)).toMatchObject({
+      quizId: "quiz_redo_memory",
+      cleared: true
+    });
+    expect(JSON.parse(storage.getItem("quiz-mcp-progress:quiz_redo_memory") || "{}")).toMatchObject({
+      quizId: "quiz_redo_memory",
+      cleared: true
     });
   });
 
@@ -707,7 +803,7 @@ function mountWidget(
     }
   };
   if (options.persistWidgetState !== "unset") {
-    windowShim.__QUIZ_ENABLE_WIDGET_STATE__ = options.persistWidgetState !== false;
+    windowShim.__QUIZ_DISABLE_WIDGET_STATE__ = options.persistWidgetState === false;
   }
   windowShim.parent = windowShim;
 
@@ -747,6 +843,10 @@ function extractWidgetScript(): string {
   }
 
   return match[1];
+}
+
+function storageSnapshot(widgetState: unknown): any {
+  return (widgetState as any)?.privateContent ?? widgetState;
 }
 
 function extractWidgetStyle(): string {

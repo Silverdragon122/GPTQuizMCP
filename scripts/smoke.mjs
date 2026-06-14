@@ -110,7 +110,7 @@ async function checkNoAuthHttpSurface() {
   assert(csp.includes("connect-src 'none'"), "Widget route CSP must forbid outbound connections.");
   assert(csp.includes("frame-ancestors https://chatgpt.com https://chat.openai.com"), "Widget route CSP must restrict frame ancestors to ChatGPT.");
   assert(widget.body.includes('data-quiz-vendor="katex"'), "Widget route must embed the vendored KaTeX runtime.");
-  assert(widget.body.includes("__QUIZ_ENABLE_WIDGET_STATE__"), "Widget route must keep host widget-state persistence gated.");
+  assert(widget.body.includes("setWidgetState"), "Widget route must keep host widget-state persistence available.");
 
   console.log("no-auth HTTP surface: ok");
 }
