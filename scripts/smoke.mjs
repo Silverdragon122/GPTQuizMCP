@@ -1,5 +1,5 @@
 const endpoint = new URL(process.env.MCP_URL || "http://127.0.0.1:8787/mcp");
-const templateUri = "ui://widget/inline-quiz-v13.html";
+const templateUri = "ui://widget/inline-quiz-v14.html";
 const expectedWidgetDomain = process.env.EXPECTED_WIDGET_DOMAIN || "";
 let nextId = 1;
 
@@ -55,7 +55,7 @@ async function checkToolDescriptor() {
   assert(tool._meta?.["openai/widgetAccessible"] === true, "Widget must remain accessible to host bridge events.");
   assert(tool._meta?.["openai/visibility"] === "public", "No-auth deployment should remain public in Apps metadata.");
 
-  console.log("tools/list: ok (noauth, v13 template)");
+  console.log("tools/list: ok (noauth, v14 template)");
 }
 
 async function checkWidgetResource() {

@@ -133,7 +133,7 @@ The local smoke test checks:
 - widget resource reading
 - quiz rendering
 - no-auth Apps SDK metadata
-- the v5 widget template URI
+- the current widget template URI
 - empty widget connect/resource domains
 - the direct widget route CSP
 - hidden OAuth metadata in no-auth mode

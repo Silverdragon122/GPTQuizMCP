@@ -27,7 +27,8 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     --bad: oklch(50% 0.16 25);
     --warn: oklch(66% 0.14 78);
     --shadow: 0 18px 56px color-mix(in oklch, var(--ink) 16%, transparent);
-    font-family: Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --score-accent: var(--primary);
+    font-family: "Cabinet Grotesk", Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -116,24 +117,24 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
 
   .quiz-shell[data-theme="ember"] {
     color-scheme: dark;
-    --ink: oklch(94% 0.014 70);
-    --muted: oklch(73% 0.034 72);
-    --faint: oklch(56% 0.044 62);
+    --ink: oklch(94% 0.012 78);
+    --muted: oklch(74% 0.028 78);
+    --faint: oklch(58% 0.036 64);
     --line: color-mix(in oklch, var(--ink) 15%, transparent);
-    --panel: oklch(20% 0.026 43);
-    --panel-strong: oklch(24% 0.032 46);
-    --soft: oklch(16% 0.024 42);
-    --primary: oklch(70% 0.16 55);
-    --primary-ink: oklch(18% 0.024 42);
+    --panel: oklch(20% 0.022 292);
+    --panel-strong: oklch(24% 0.024 292);
+    --soft: oklch(16% 0.02 292);
+    --primary: oklch(72% 0.135 58);
+    --primary-ink: oklch(20% 0.018 292);
     --good: oklch(72% 0.12 144);
     --bad: oklch(72% 0.15 29);
     --warn: oklch(78% 0.14 72);
-    --shadow: 0 20px 58px color-mix(in oklch, oklch(0% 0 0) 36%, transparent);
-    --theme-glow-a: color-mix(in oklch, var(--primary) 17%, transparent);
-    --theme-glow-b: color-mix(in oklch, var(--bad) 10%, transparent);
+    --shadow: 0 20px 58px color-mix(in oklch, oklch(0% 0 0) 34%, transparent);
+    --theme-glow-a: color-mix(in oklch, var(--primary) 8%, transparent);
+    --theme-glow-b: color-mix(in oklch, oklch(62% 0.12 320) 7%, transparent);
     --swatch-a: oklch(70% 0.16 55);
     --swatch-b: oklch(72% 0.15 29);
-    --swatch-c: oklch(24% 0.032 46);
+    --swatch-c: oklch(24% 0.024 292);
   }
 
   .quiz-shell[data-theme="circuit"] {
@@ -234,9 +235,9 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     margin: 0 auto;
     color: var(--ink);
     background:
-      radial-gradient(circle at 0% 0%, var(--theme-glow-a, color-mix(in oklch, var(--primary) 16%, transparent)), transparent 34%),
-      radial-gradient(circle at 100% 12%, var(--theme-glow-b, color-mix(in oklch, var(--good) 13%, transparent)), transparent 32%),
-      linear-gradient(135deg, var(--panel-strong), var(--panel));
+      radial-gradient(circle at 6% -8%, var(--theme-glow-a, color-mix(in oklch, var(--primary) 9%, transparent)), transparent 34%),
+      radial-gradient(circle at 108% 2%, var(--theme-glow-b, color-mix(in oklch, var(--good) 7%, transparent)), transparent 30%),
+      var(--panel);
     border: 1px solid var(--line);
     border-radius: 10px;
     box-shadow: var(--shadow);
@@ -253,6 +254,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     gap: 14px 16px;
     align-items: start;
     padding: 18px 18px 14px;
+    background: color-mix(in oklch, var(--panel-strong) 42%, transparent);
     border-bottom: 1px solid var(--line);
   }
 
@@ -343,6 +345,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   .flag-action {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 7px;
     min-height: 30px;
     padding: 5px 9px;
@@ -473,7 +476,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   .progress-fill {
     height: 100%;
     width: 100%;
-    background: linear-gradient(90deg, var(--primary), var(--good));
+    background: var(--primary);
     border-radius: inherit;
     transform: scaleX(var(--progress-scale, 0));
     transform-origin: left center;
@@ -718,8 +721,9 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto;
+    align-content: start;
     gap: 12px;
-    min-height: 132px;
+    min-height: 124px;
     padding: 13px;
     overflow: visible;
     background: color-mix(in oklch, var(--soft) 78%, transparent);
@@ -776,6 +780,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   .review-nav {
     display: flex;
     flex-wrap: wrap;
+    align-items: stretch;
     gap: 9px;
     min-height: 39px;
     overflow: visible;
@@ -783,50 +788,62 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
 
   .actions {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 9px;
+    align-items: stretch;
     min-height: 39px;
   }
 
   .primary-action,
   .secondary-action,
   .subtle-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 auto;
+    min-width: 112px;
     min-height: 39px;
     height: auto;
     padding: 8px 13px;
+    color: var(--ink);
     border-radius: 8px;
     cursor: pointer;
+    font-weight: 650;
+    line-height: 1.15;
+    text-align: center;
     white-space: normal;
     overflow-wrap: anywhere;
     transition:
       transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
       opacity 170ms ease,
       border-color 170ms ease,
-    background 170ms ease;
+      background 170ms ease,
+      box-shadow 170ms ease;
   }
 
   .actions .primary-action,
   .actions .secondary-action {
+    min-width: 0;
     width: 100%;
   }
 
   .primary-action {
     color: var(--primary-ink);
-    background: color-mix(in oklch, var(--primary) 88%, var(--ink));
-    border: 1px solid color-mix(in oklch, var(--primary) 84%, var(--ink));
+    background: color-mix(in oklch, var(--primary) 84%, var(--panel-strong));
+    border: 1px solid color-mix(in oklch, var(--primary) 74%, var(--ink));
+    box-shadow: 0 8px 18px color-mix(in oklch, var(--primary) 16%, transparent);
   }
 
   .secondary-action {
     color: var(--ink);
-    background: color-mix(in oklch, var(--panel-strong) 70%, transparent);
+    background: color-mix(in oklch, var(--panel-strong) 82%, var(--soft));
     border: 1px solid var(--line);
   }
 
   .subtle-action {
-    color: var(--muted);
-    background: transparent;
-    border: 1px solid transparent;
+    color: var(--ink);
+    background: color-mix(in oklch, var(--panel-strong) 56%, transparent);
+    border: 1px solid color-mix(in oklch, var(--line) 78%, transparent);
   }
 
   .primary-action:hover:not(:disabled),
@@ -844,6 +861,14 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   .subtle-action:hover:not(:disabled),
   .subtle-action:focus-visible {
     border-color: color-mix(in oklch, var(--primary) 38%, var(--line));
+    background: color-mix(in oklch, var(--primary) 8%, var(--panel-strong));
+  }
+
+  .primary-action:hover:not(:disabled),
+  .primary-action:focus-visible {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--primary) 30%, transparent),
+      0 10px 22px color-mix(in oklch, var(--primary) 18%, transparent);
   }
 
   .primary-action:disabled,
@@ -855,8 +880,8 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
 
   .result {
     display: grid;
-    grid-template-rows: auto auto auto auto auto;
-    gap: 16px;
+    grid-template-rows: auto auto auto auto auto auto;
+    gap: 14px;
     min-height: var(--fixed-shell-height, 0px);
     padding: 18px;
     overflow: visible;
@@ -872,7 +897,19 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 16px;
-    align-items: start;
+    align-items: stretch;
+    padding: 14px;
+    background: color-mix(in oklch, var(--panel-strong) 62%, transparent);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+
+  .result.passed {
+    --score-accent: var(--good);
+  }
+
+  .result.needs-practice {
+    --score-accent: var(--warn);
   }
 
   .result h2 {
@@ -888,9 +925,27 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     line-height: 1.45;
   }
 
+  .score-card {
+    display: grid;
+    align-content: center;
+    justify-items: end;
+    gap: 4px;
+    min-width: 116px;
+    padding: 10px 12px;
+    background: color-mix(in oklch, var(--score-accent) 10%, var(--panel));
+    border: 1px solid color-mix(in oklch, var(--score-accent) 36%, var(--line));
+    border-radius: 8px;
+  }
+
+  .score-label {
+    color: var(--muted);
+    font-size: 0.74rem;
+    line-height: 1.1;
+    font-weight: 650;
+  }
+
   .score-value {
-    min-width: 92px;
-    color: var(--ink);
+    color: var(--score-accent);
     font-size: 2.35rem;
     line-height: 0.95;
     font-weight: 760;
@@ -899,23 +954,27 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   }
 
   .score-track {
-    height: 10px;
+    height: 9px;
     overflow: hidden;
     background: color-mix(in oklch, var(--muted) 18%, transparent);
+    border: 1px solid color-mix(in oklch, var(--ink) 10%, transparent);
     border-radius: 999px;
   }
 
   .score-fill {
     height: 100%;
-    width: var(--score, 0%);
-    background: linear-gradient(90deg, var(--bad), var(--warn), var(--good));
+    width: 100%;
+    background: var(--score-accent);
     border-radius: inherit;
-    transition: width 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform: scaleX(var(--score-scale, 0));
+    transform-origin: left center;
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
   }
 
   .metrics {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 9px;
   }
 
@@ -925,6 +984,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     background: color-mix(in oklch, var(--panel-strong) 74%, transparent);
     border: 1px solid var(--line);
     border-radius: 8px;
+    overflow: hidden;
   }
 
   .metric span {
@@ -946,6 +1006,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     display: grid;
     gap: 9px;
     min-height: 0;
+    align-content: start;
     padding: 13px;
     overflow: visible;
     scrollbar-width: thin;
@@ -964,7 +1025,9 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   }
 
   .miss-button {
+    display: block;
     width: 100%;
+    min-height: 42px;
     padding: 10px 11px;
     color: var(--ink);
     background: color-mix(in oklch, var(--panel-strong) 74%, transparent);
@@ -972,11 +1035,19 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     border-radius: 8px;
     text-align: left;
     cursor: pointer;
+    line-height: 1.28;
+    overflow-wrap: anywhere;
+    transition:
+      transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 170ms ease,
+      background 170ms ease;
   }
 
   .miss-button:hover,
   .miss-button:focus-visible {
+    transform: translateY(-1px);
     border-color: color-mix(in oklch, var(--bad) 45%, var(--line));
+    background: color-mix(in oklch, var(--bad) 7%, var(--panel-strong));
     outline: none;
   }
 
@@ -1047,6 +1118,13 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
       width: 100%;
       transform: translateX(0);
     }
+
+    .quiz-shell *,
+    .quiz-shell *::before,
+    .quiz-shell *::after {
+      animation-duration: 1ms !important;
+      transition-duration: 1ms !important;
+    }
   }
 
   @media (max-width: 640px) {
@@ -1086,6 +1164,11 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
       grid-template-columns: 1fr;
     }
 
+    .score-card {
+      justify-items: start;
+      min-width: 0;
+    }
+
     .topbar {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -1117,6 +1200,28 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
 
     .theme-panel {
       grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .feedback-actions,
+    .review-nav {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    .feedback-actions > button,
+    .review-nav > button {
+      width: 100%;
+    }
+
+    .actions {
+      grid-template-columns: 1fr;
+      min-height: 0;
+    }
+
+    .metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 </style>
@@ -2415,7 +2520,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     const passed = analytics.percent >= targetGrade;
 
     const result = document.createElement("div");
-    result.className = "result";
+    result.className = "result " + (passed ? "passed" : "needs-practice");
 
     const hero = document.createElement("div");
     hero.className = "result-hero";
@@ -2424,26 +2529,35 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     const heading = document.createElement("h2");
     heading.textContent = passed ? "Strong finish" : "Keep practicing";
     const detail = document.createElement("p");
+    const unansweredText = analytics.unansweredCount > 0
+      ? " " + String(analytics.unansweredCount) + " unanswered."
+      : "";
     detail.textContent =
-      "You answered " +
       String(analytics.correctCount) +
-      " of " +
+      " correct out of " +
       String(analytics.total) +
-      " correctly. Target grade: " +
+      ". Target: " +
       String(targetGrade) +
-      "%.";
+      "%." +
+      unansweredText;
     copy.append(heading, detail);
 
+    const scoreCard = document.createElement("div");
+    scoreCard.className = "score-card";
+    const scoreLabel = document.createElement("span");
+    scoreLabel.className = "score-label";
+    scoreLabel.textContent = "Score";
     const score = document.createElement("div");
     score.className = "score-value";
     score.textContent = String(analytics.percent) + "%";
-    hero.append(copy, score);
+    scoreCard.append(scoreLabel, score);
+    hero.append(copy, scoreCard);
 
     const scoreTrack = document.createElement("div");
     scoreTrack.className = "score-track";
     const scoreFill = document.createElement("div");
     scoreFill.className = "score-fill";
-    scoreFill.style.setProperty("--score", String(analytics.percent) + "%");
+    scoreFill.style.setProperty("--score-scale", String(analytics.percent / 100));
     scoreTrack.append(scoreFill);
 
     const themeTools = document.createElement("div");
@@ -2467,9 +2581,13 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     const summary = document.createElement("div");
     summary.className = "review-summary";
     const summaryText = document.createElement("p");
-    summaryText.textContent = analytics.missedCount === 0
-      ? "Every answer landed. Try again with a new order, or ask for a new quiz with new material."
-      : "Review the missed items, then try again when you are ready.";
+    summaryText.textContent = analytics.total === 0
+      ? "No questions were available in this quiz."
+      : analytics.unansweredCount > 0
+        ? "Finish the unanswered items, or review what is already complete."
+        : analytics.missedCount === 0
+          ? "Every answer landed. Try again with a new order, or ask for a new quiz with new material."
+          : "Review the missed items, then try again when you are ready.";
     summary.append(summaryText);
 
     if (analytics.missedQuestions.length > 0) {
@@ -2491,7 +2609,9 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     }
 
     const actions = document.createElement("div");
-    actions.className = "actions";
+    actions.className = "actions result-actions";
+    actions.setAttribute("aria-label", "Result actions");
+    actions.append(makeButton("Try again", "primary-action result-primary", retakeQuiz));
     actions.append(makeButton("Learn", "secondary-action", () => {
       enterLearnMode(analytics.missedCount > 0 ? "missed" : "all");
     }));
@@ -2505,7 +2625,6 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     if (analytics.flaggedCount > 0) {
       actions.append(makeButton("Flagged", "secondary-action", () => enterReviewMode("flagged")));
     }
-    actions.append(makeButton("Try again", "primary-action", retakeQuiz));
 
     if (typeof getOpenAI()?.sendFollowUpMessage === "function") {
       actions.append(makeButton("Review with GPT", "secondary-action", () => reviewResultsWithGPT(analytics)));
