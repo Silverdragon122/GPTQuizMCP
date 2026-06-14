@@ -91,12 +91,24 @@ class TestElement {
 class TestStorage {
   values: Record<string, string> = {};
 
+  constructor(private readonly options: { failGet?: boolean; failSet?: boolean } = {}) {}
+
   getItem(key: string): string | null {
+    if (this.options.failGet) {
+      throw new Error("Storage get failed");
+    }
     return this.values[key] ?? null;
   }
 
   setItem(key: string, value: string): void {
+    if (this.options.failSet) {
+      throw new Error("Storage set failed");
+    }
     this.values[key] = String(value);
+  }
+
+  removeItem(key: string): void {
+    delete this.values[key];
   }
 }
 
@@ -136,12 +148,7 @@ describe("quiz widget hydration", () => {
       }
     });
 
-    expect(openai.widgetState).toMatchObject({
-      privateContent: {
-        quizId: "quiz_metadata",
-        phase: "question"
-      }
-    });
+    expect(openai.widgetState).toBeNull();
     expect(root.textContent).toContain("Metadata quiz");
     expect(root.textContent).not.toContain("Waiting for quiz data");
   });
@@ -158,12 +165,7 @@ describe("quiz widget hydration", () => {
       }
     });
 
-    expect(openai.widgetState).toMatchObject({
-      privateContent: {
-        quizId: "quiz_nested",
-        phase: "question"
-      }
-    });
+    expect(openai.widgetState).toBeNull();
     expect(root.textContent).toContain("Nested metadata quiz");
     expect(root.textContent).not.toContain("Waiting for quiz data");
   });
@@ -186,12 +188,7 @@ describe("quiz widget hydration", () => {
       }
     });
 
-    expect(openai.widgetState).toMatchObject({
-      privateContent: {
-        quizId: "quiz_late_bridge",
-        phase: "question"
-      }
-    });
+    expect(openai.widgetState).toBeNull();
     expect(root.textContent).toContain("Late bridge quiz");
     expect(root.textContent).not.toContain("Waiting for quiz data");
   });
@@ -215,17 +212,12 @@ describe("quiz widget hydration", () => {
       }
     });
 
-    expect(openai.widgetState).toMatchObject({
-      privateContent: {
-        quizId: "quiz_late_globals",
-        phase: "question"
-      }
-    });
+    expect(openai.widgetState).toBeNull();
     expect(root.textContent).toContain("Late globals quiz");
     expect(root.textContent).not.toContain("Waiting for quiz data");
   });
 
-  it("does not call host widget-state persistence unless explicitly enabled", () => {
+  it("does not call host widget-state persistence when explicitly disabled", () => {
     const toolResult = makeToolResult("No host persistence quiz", "quiz_no_host_persist");
     const { openai, root } = mountWidget(
       {
@@ -241,6 +233,72 @@ describe("quiz widget hydration", () => {
     findButtonContainingText(root, "Correct")!.click();
     expect(root.textContent).toContain("Correct");
     expect(openai.widgetState).toBeNull();
+  });
+
+  it("does not call host widget-state persistence unless the opt-in flag is present", () => {
+    const storage = new TestStorage();
+    const toolResult = makeToolResult("Unset host persistence quiz", "quiz_unset_host_persist");
+    const { openai, root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta }
+      },
+      { localStorage: storage, persistWidgetState: "unset" }
+    );
+
+    findButtonContainingText(root, "Correct")!.click();
+
+    expect(openai.widgetState).toBeNull();
+    expect(storage.getItem("quiz-mcp-progress:quiz_unset_host_persist")).toContain('"answers"');
+  });
+
+  it("restores compact progress from local fallback storage", () => {
+    const storage = new TestStorage();
+    storage.setItem("quiz-mcp-progress:quiz_local_fallback", JSON.stringify({
+      version: 5,
+      quizId: "quiz_local_fallback",
+      updatedAt: 10,
+      answers: { q_0: "a_0_1" },
+      phase: "feedback"
+    }));
+    const toolResult = makeToolResult("Local fallback quiz", "quiz_local_fallback");
+    const { root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta },
+        widgetState: null
+      },
+      { localStorage: storage }
+    );
+
+    expect(root.textContent).toContain("Local fallback quiz");
+    expect(root.textContent).toContain("Not quite");
+  });
+
+  it("restores compact progress from cookies when localStorage is unavailable", () => {
+    const storage = new TestStorage({ failGet: true, failSet: true });
+    const encodedProgress = encodeURIComponent(JSON.stringify({
+      version: 5,
+      quizId: "quiz_cookie_fallback",
+      updatedAt: 10,
+      answers: { q_0: "a_0_1" },
+      phase: "feedback"
+    }));
+    const toolResult = makeToolResult("Cookie fallback quiz", "quiz_cookie_fallback");
+    const { root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta },
+        widgetState: null
+      },
+      {
+        cookie: `quiz_mcp_progress_quiz_cookie_fallback=${encodedProgress}`,
+        localStorage: storage
+      }
+    );
+
+    expect(root.textContent).toContain("Cookie fallback quiz");
+    expect(root.textContent).toContain("Not quite");
   });
 
   it("requires submit for multi-correct questions and scores the exact selected set", () => {
@@ -267,10 +325,10 @@ describe("quiz widget hydration", () => {
     findButtonContainingText(root, "3")!.click();
     expect(openai.widgetState).toMatchObject({
       privateContent: {
+        quizId: "quiz_multi",
         selections: {
           q_0: ["a_0_1"]
-        },
-        answers: {}
+        }
       }
     });
     expect(findButtonByText(root, "Submit answer")?.disabled).toBe(false);
@@ -279,11 +337,9 @@ describe("quiz widget hydration", () => {
     findButtonByText(root, "Submit answer")!.click();
     expect(openai.widgetState).toMatchObject({
       privateContent: {
+        quizId: "quiz_multi",
         answers: {
-          q_0: {
-            choiceIds: expect.arrayContaining(["a_0_0", "a_0_1"]),
-            correct: true
-          }
+          q_0: expect.arrayContaining(["a_0_0", "a_0_1"])
         }
       }
     });
@@ -307,11 +363,9 @@ describe("quiz widget hydration", () => {
     findButtonByText(root, "Submit answer")!.click();
     expect(openai.widgetState).toMatchObject({
       privateContent: {
+        quizId: "quiz_incomplete",
         answers: {
-          q_0: {
-            choiceIds: ["a_0_1"],
-            correct: false
-          }
+          q_0: "a_0_1"
         }
       }
     });
@@ -388,6 +442,63 @@ describe("quiz widget hydration", () => {
     findButtonByText(root, "Harbor")!.click();
     expect(root.getAttribute("data-theme")).toBe("harbor");
     expect(storage.getItem("quiz-mcp-theme")).toBe("harbor");
+    expect(storage.getItem("quiz-mcp-progress:quiz_theme")).toContain('"theme":"harbor"');
+  });
+
+  it("restores saved theme before applying the tool-provided theme", () => {
+    const storage = new TestStorage();
+    storage.setItem("quiz-mcp-theme", "harbor");
+    const toolResult = makeToolResult("Saved theme quiz", "quiz_saved_theme", { theme: "ember" });
+    const { root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta }
+      },
+      { localStorage: storage }
+    );
+
+    expect(root.getAttribute("data-theme")).toBe("harbor");
+  });
+
+  it("restores per-quiz theme snapshots immediately after a theme-only change", () => {
+    const storage = new TestStorage();
+    storage.setItem("quiz-mcp-progress:quiz_snapshot_theme", JSON.stringify({
+      version: 5,
+      quizId: "quiz_snapshot_theme",
+      updatedAt: 10,
+      theme: "harbor"
+    }));
+    const toolResult = makeToolResult("Snapshot theme quiz", "quiz_snapshot_theme", { theme: "ember" });
+    const { root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta },
+        widgetState: null
+      },
+      { localStorage: storage }
+    );
+
+    expect(root.getAttribute("data-theme")).toBe("harbor");
+  });
+
+  it("persists theme to cookies when localStorage quota is exhausted", () => {
+    const storage = new TestStorage({ failSet: true });
+    const toolResult = makeToolResult("Theme cookie quiz", "quiz_theme_cookie", { theme: "ember" });
+    const { cookie, root } = mountWidget(
+      {
+        toolOutput: toolResult.structuredContent,
+        toolResponseMetadata: { _meta: toolResult._meta }
+      },
+      { localStorage: storage }
+    );
+
+    expect(root.getAttribute("data-theme")).toBe("ember");
+
+    findButtonByText(root, "Theme")!.click();
+    findButtonByText(root, "Harbor")!.click();
+
+    expect(root.getAttribute("data-theme")).toBe("harbor");
+    expect(cookie()).toContain("quiz_mcp_theme=harbor");
   });
 
   it("keeps learn and review off the mid-quiz toolbar and opens learn from results", () => {
@@ -535,15 +646,42 @@ describe("quiz widget hydration", () => {
   });
 });
 
-function mountWidget(openai: Record<string, unknown>, options: { localStorage?: TestStorage; persistWidgetState?: boolean } = {}) {
+function mountWidget(
+  openai: Record<string, unknown>,
+  options: { cookie?: string; localStorage?: TestStorage; persistWidgetState?: boolean | "unset" } = {}
+) {
   const root = new TestElement("div");
   const windowListeners: Record<string, Array<(event: any) => void>> = {};
+  const cookies = new Map<string, string>();
+  for (const part of (options.cookie || "").split(/;\s*/)) {
+    const index = part.indexOf("=");
+    if (index > 0) {
+      cookies.set(part.slice(0, index), part.slice(index + 1));
+    }
+  }
   const documentShim = {
     visibilityState: "visible",
     getElementById: (id: string) => id === "quiz-root" ? root : null,
     createElement: (tagName: string) => new TestElement(tagName),
     createTextNode: (text: string) => new TestTextNode(text),
-    addEventListener: (_type: string, _handler: unknown) => undefined
+    addEventListener: (_type: string, _handler: unknown) => undefined,
+    get cookie() {
+      return [...cookies.entries()].map(([key, value]) => `${key}=${value}`).join("; ");
+    },
+    set cookie(value: string) {
+      const [pair, ...attributes] = String(value || "").split(";");
+      const index = pair.indexOf("=");
+      if (index < 1) {
+        return;
+      }
+      const key = pair.slice(0, index);
+      const cookieValue = pair.slice(index + 1);
+      if (attributes.some((attribute) => attribute.trim().toLowerCase() === "max-age=0")) {
+        cookies.delete(key);
+      } else {
+        cookies.set(key, cookieValue);
+      }
+    }
   };
   const openaiShim: Record<string, unknown> = {
     widgetState: null,
@@ -557,7 +695,6 @@ function mountWidget(openai: Record<string, unknown>, options: { localStorage?: 
   const windowShim: Record<string, unknown> = {
     openai: openaiShim,
     parent: {},
-    __QUIZ_ENABLE_WIDGET_STATE__: options.persistWidgetState !== false,
     __QUIZ_PREVIEW__: null,
     __QUIZ_PREVIEW_META__: {},
     localStorage: options.localStorage,
@@ -569,6 +706,9 @@ function mountWidget(openai: Record<string, unknown>, options: { localStorage?: 
       windowListeners[type]!.push(handler as (event: any) => void);
     }
   };
+  if (options.persistWidgetState !== "unset") {
+    windowShim.__QUIZ_ENABLE_WIDGET_STATE__ = options.persistWidgetState !== false;
+  }
   windowShim.parent = windowShim;
 
   const runWidget = new Function(
@@ -589,6 +729,7 @@ function mountWidget(openai: Record<string, unknown>, options: { localStorage?: 
 
   return {
     root,
+    cookie: () => documentShim.cookie,
     openai: windowShim.openai as Record<string, unknown>,
     windowShim,
     dispatchWindowEvent(type: string, event: any) {

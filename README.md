@@ -242,7 +242,7 @@ Do not commit `.quizmcp-admin.json`. It is already ignored by git.
 ## Security Notes
 
 - The Worker stores no quiz attempts, answers, or user progress.
-- Widget progress is saved only in ChatGPT widget state.
+- Widget progress is saved client-side only, using compact browser storage with a cookie fallback. ChatGPT widget-state writes are gated behind an explicit opt-in flag.
 - The answer key is sent only as widget metadata, not in model-visible quiz content.
 - The widget uses `textContent` instead of `innerHTML` for quiz text.
 - Requests, batch size, question count, string length, and total quiz text are limited.

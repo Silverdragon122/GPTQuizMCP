@@ -53,7 +53,7 @@ const APP_NAME = "quiz-mcp";
 const APP_VERSION = "0.1.0";
 const LATEST_PROTOCOL_VERSION = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]);
-const TEMPLATE_URI = "ui://widget/inline-quiz-v10.html";
+const TEMPLATE_URI = "ui://widget/inline-quiz-v13.html";
 const LEGACY_TEMPLATE_URIS = new Set([
   "ui://widget/inline-quiz-v1.html",
   "ui://widget/inline-quiz-v2.html",
@@ -63,7 +63,10 @@ const LEGACY_TEMPLATE_URIS = new Set([
   "ui://widget/inline-quiz-v6.html",
   "ui://widget/inline-quiz-v7.html",
   "ui://widget/inline-quiz-v8.html",
-  "ui://widget/inline-quiz-v9.html"
+  "ui://widget/inline-quiz-v9.html",
+  "ui://widget/inline-quiz-v10.html",
+  "ui://widget/inline-quiz-v11.html",
+  "ui://widget/inline-quiz-v12.html"
 ]);
 const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 const TOOL_NAME = "render_inline_quiz";

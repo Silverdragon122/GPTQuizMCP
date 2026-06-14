@@ -1145,7 +1145,8 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     reviewMode: "all",
     studyMode: "quiz",
     showResult: false,
-    phase: "question"
+    phase: "question",
+    theme: ""
   };
 
   const DEFAULT_TARGET_GRADE_PERCENT = 70;
@@ -1155,6 +1156,11 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   const HYDRATION_RETRY_LIMIT = 45;
   const HYDRATION_RETRY_DELAY_MS = 120;
   const THEME_STORAGE_KEY = "quiz-mcp-theme";
+  const THEME_COOKIE_KEY = "quiz_mcp_theme";
+  const PROGRESS_STORAGE_KEY_PREFIX = "quiz-mcp-progress:";
+  const PROGRESS_COOKIE_KEY_PREFIX = "quiz_mcp_progress_";
+  const MAX_PERSISTED_STATE_CHARS = 180000;
+  const MAX_COOKIE_VALUE_CHARS = 3600;
   const DEFAULT_THEME_ID = "aurora";
   const STUDY_MODES = ["quiz", "learn", "review"];
   const REVIEW_MODES = ["all", "missed", "flagged"];
@@ -1169,6 +1175,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   const escapeText = (value) => String(value ?? "");
   let activeThemeId = readThemePreference() || DEFAULT_THEME_ID;
   let themeMenuOpen = false;
+  let lastPersistedStateJson = "";
 
   function getOpenAI() {
     return window.openai && typeof window.openai === "object" ? window.openai : null;
@@ -1219,25 +1226,129 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     };
   }
 
-  function setState(nextState) {
+  function setState(nextState, options) {
     state = normalizeStateForCurrentQuiz(nextState) || defaultState(quiz?.quizId || "");
-    persistWidgetState();
+    if (options?.persist !== false) {
+      persistWidgetState(options);
+    }
   }
 
-  function persistWidgetState() {
-    if (window.__QUIZ_ENABLE_WIDGET_STATE__ !== true) {
+  function persistWidgetState(options) {
+    if (!quiz?.quizId) {
       return;
     }
 
+    const snapshot = compactStateForPersistence(state, options);
+    if (!snapshot) {
+      if (options?.clear === true) {
+        writeProgressClearMarker(quiz.quizId);
+        writeHostWidgetState({ privateContent: defaultState(quiz.quizId) });
+      }
+      return;
+    }
+
+    const serialized = safeJsonStringify(snapshot);
+    if (!serialized || serialized.length > MAX_PERSISTED_STATE_CHARS) {
+      return;
+    }
+    if (serialized === lastPersistedStateJson && options?.force !== true) {
+      return;
+    }
+    lastPersistedStateJson = serialized;
+    writeLocalProgressState(snapshot, serialized);
+    writeHostWidgetState({ privateContent: snapshot });
+  }
+
+  function writeHostWidgetState(snapshot) {
+    if (window.__QUIZ_ENABLE_WIDGET_STATE__ !== true || typeof getOpenAI()?.setWidgetState !== "function") {
+      return;
+    }
     try {
-      getOpenAI()?.setWidgetState?.({
-        modelContent: null,
-        privateContent: state,
-        imageIds: []
-      });
+      getOpenAI()?.setWidgetState?.(snapshot);
     } catch (error) {
       console.warn("Quiz progress could not be saved", error);
     }
+  }
+
+  function compactStateForPersistence(candidate, options) {
+    const normalized = normalizeStateForCurrentQuiz(candidate);
+    const meaningful = hasMeaningfulQuizState(normalized);
+    if (!normalized || !normalized.quizId || (!meaningful && (options?.clear || !options?.force))) {
+      return null;
+    }
+
+    const snapshot = {
+      version: STATE_VERSION,
+      quizId: normalized.quizId,
+      updatedAt: Date.now()
+    };
+    const theme = getTheme(normalized.theme)?.id || activeThemeId;
+    if (theme) snapshot.theme = theme;
+    if (normalized.index > 0) snapshot.index = normalized.index;
+    const answers = compactAnswerMap(normalized.answers);
+    if (Object.keys(answers).length > 0) snapshot.answers = answers;
+    const selections = compactArrayMap(normalized.selections);
+    if (Object.keys(selections).length > 0) snapshot.selections = selections;
+    const flagged = compactFlagMap(normalized.flagged);
+    if (Object.keys(flagged).length > 0) snapshot.flagged = flagged;
+    const revealed = compactFlagMap(normalized.revealed);
+    if (Object.keys(revealed).length > 0) snapshot.revealed = revealed;
+    if (normalized.review) snapshot.review = true;
+    if (normalized.reviewMode !== "all") snapshot.reviewMode = normalized.reviewMode;
+    if (normalized.studyMode !== "quiz") snapshot.studyMode = normalized.studyMode;
+    if (normalized.showResult) snapshot.showResult = true;
+    if (normalized.phase !== "question") snapshot.phase = normalized.phase;
+    return snapshot;
+  }
+
+  function compactAnswerMap(answers) {
+    const output = {};
+    for (const [questionId, answer] of Object.entries(answers || {})) {
+      const choiceIds = getSavedChoiceIds(answer);
+      if (choiceIds.length === 1) {
+        output[questionId] = choiceIds[0];
+      } else if (choiceIds.length > 1) {
+        output[questionId] = choiceIds;
+      }
+    }
+    return output;
+  }
+
+  function compactArrayMap(value) {
+    const output = {};
+    for (const [questionId, choiceIds] of Object.entries(value || {})) {
+      const normalized = uniqueStrings(choiceIds);
+      if (normalized.length > 0) {
+        output[questionId] = normalized;
+      }
+    }
+    return output;
+  }
+
+  function compactFlagMap(value) {
+    const output = {};
+    for (const [questionId, enabled] of Object.entries(value || {})) {
+      if (enabled === true) {
+        output[questionId] = true;
+      }
+    }
+    return output;
+  }
+
+  function hasMeaningfulQuizState(value) {
+    return Boolean(
+      value?.index > 0 ||
+      Object.keys(value?.answers || {}).length > 0 ||
+      Object.keys(value?.selections || {}).length > 0 ||
+      Object.keys(value?.flagged || {}).length > 0 ||
+      Object.keys(value?.revealed || {}).length > 0 ||
+      normalizeThemeId(value?.theme) !== null ||
+      value?.review === true ||
+      value?.showResult === true ||
+      value?.phase === "feedback" ||
+      value?.phase === "review" ||
+      value?.phase === "result"
+    );
   }
 
   function setStatus(text) {
@@ -1255,13 +1366,21 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     return THEME_CATALOG.find((theme) => theme.id === themeId) || null;
   }
 
+  function normalizeThemeId(themeId) {
+    return getTheme(themeId)?.id || null;
+  }
+
   function readThemePreference() {
     try {
       const storedTheme = window.localStorage?.getItem(THEME_STORAGE_KEY);
-      return getTheme(storedTheme)?.id || null;
+      const theme = getTheme(storedTheme)?.id;
+      if (theme) {
+        return theme;
+      }
     } catch {
-      return null;
+      // Fall through to the cookie fallback when storage quota is exhausted.
     }
+    return getTheme(readCookie(THEME_COOKIE_KEY))?.id || null;
   }
 
   function writeThemePreference(themeId) {
@@ -1269,6 +1388,108 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
       window.localStorage?.setItem(THEME_STORAGE_KEY, themeId);
     } catch {
       // Theme persistence is best-effort inside sandboxed widget hosts.
+    }
+    writeCookie(THEME_COOKIE_KEY, themeId, 60 * 60 * 24 * 180);
+  }
+
+  function getProgressStorageKey(quizId) {
+    return PROGRESS_STORAGE_KEY_PREFIX + encodeURIComponent(escapeText(quizId)).replace(/[^A-Za-z0-9_.!~*'()-]/g, "_");
+  }
+
+  function readLocalProgressState(quizId) {
+    if (!quizId) {
+      return null;
+    }
+    try {
+      const raw = window.localStorage?.getItem(getProgressStorageKey(quizId));
+      if (!raw || raw.length > MAX_PERSISTED_STATE_CHARS) {
+        throw new Error("No local progress state.");
+      }
+      return JSON.parse(raw);
+    } catch {
+      const encoded = readCookie(getProgressCookieKey(quizId));
+      if (!encoded || encoded.length > MAX_COOKIE_VALUE_CHARS) {
+        return null;
+      }
+      try {
+        return JSON.parse(encoded);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  function writeLocalProgressState(snapshot, serialized) {
+    try {
+      window.localStorage?.setItem(getProgressStorageKey(snapshot.quizId), serialized);
+    } catch {
+      // Progress has host widget-state as a second best-effort path.
+    }
+    if (serialized.length <= MAX_COOKIE_VALUE_CHARS) {
+      writeCookie(getProgressCookieKey(snapshot.quizId), serialized, 60 * 60 * 24 * 30);
+    }
+  }
+
+  function writeProgressClearMarker(quizId) {
+    const marker = {
+      version: STATE_VERSION,
+      quizId,
+      updatedAt: Date.now(),
+      cleared: true
+    };
+    const serialized = safeJsonStringify(marker);
+    try {
+      window.localStorage?.removeItem?.(getProgressStorageKey(quizId));
+    } catch {
+      // Progress clearing is best-effort inside sandboxed widget hosts.
+    }
+    if (serialized) {
+      writeLocalProgressState(marker, serialized);
+    }
+  }
+
+  function getProgressCookieKey(quizId) {
+    return PROGRESS_COOKIE_KEY_PREFIX + encodeURIComponent(escapeText(quizId)).replace(/[^A-Za-z0-9_-]/g, "_");
+  }
+
+  function readCookie(name) {
+    try {
+      const prefix = encodeURIComponent(name) + "=";
+      const cookies = String(document.cookie || "").split(/;\s*/);
+      for (const cookie of cookies) {
+        if (cookie.startsWith(prefix)) {
+          return decodeURIComponent(cookie.slice(prefix.length));
+        }
+      }
+    } catch {
+      return "";
+    }
+    return "";
+  }
+
+  function writeCookie(name, value, maxAgeSeconds) {
+    try {
+      const encodedValue = encodeURIComponent(String(value || ""));
+      if (encodedValue.length > MAX_COOKIE_VALUE_CHARS) {
+        return;
+      }
+      document.cookie =
+        encodeURIComponent(name) +
+        "=" +
+        encodedValue +
+        "; Max-Age=" +
+        String(maxAgeSeconds) +
+        "; Path=/; SameSite=None; Secure";
+    } catch {
+      // Cookie persistence is best-effort and may be blocked by the host.
+    }
+  }
+
+  function safeJsonStringify(value) {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "";
     }
   }
 
@@ -1280,6 +1501,10 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     applyTheme(theme.id);
     if (options?.persist !== false) {
       writeThemePreference(theme.id);
+    }
+    if (quiz?.quizId) {
+      state = normalizeStateForCurrentQuiz({ ...state, theme: theme.id }) || state;
+      persistWidgetState({ force: true });
     }
     if (retakeArguments && typeof retakeArguments === "object") {
       retakeArguments = { ...retakeArguments, theme: theme.id };
@@ -1350,11 +1575,14 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     answerKey = meta?.answerKey || {};
     explanations = meta?.explanations || {};
     choiceExplanations = meta?.choiceExplanations || {};
-    if (getTheme(structuredContent.theme)) {
-      applyTheme(structuredContent.theme);
-      writeThemePreference(activeThemeId);
-    } else {
-      applyTheme(readThemePreference() || activeThemeId);
+    const saved = readSavedWidgetState(quiz);
+    const savedTheme = normalizeThemeId(saved?.theme);
+    const storedTheme = readThemePreference();
+    const toolTheme = normalizeThemeId(structuredContent.theme);
+    const nextTheme = savedTheme || storedTheme || toolTheme || activeThemeId;
+    applyTheme(nextTheme);
+    if (!savedTheme && !storedTheme && toolTheme) {
+      writeThemePreference(toolTheme);
     }
     unlockShellHeight();
     retakeArguments =
@@ -1365,11 +1593,10 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     isBusy = false;
     statusText = "";
 
-    const saved = normalizeSavedWidgetState(readSavedWidgetState(), quiz);
     if (saved) {
-      setState(saved);
+      setState(saved, { persist: false });
     } else {
-      setState(defaultState(quiz.quizId));
+      setState(defaultState(quiz.quizId), { persist: false });
     }
 
     renderSafely();
@@ -1393,11 +1620,43 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
       reviewMode: "all",
       studyMode: "quiz",
       showResult: false,
-      phase: "question"
+      phase: "question",
+      theme: activeThemeId
     };
   }
 
-  function readSavedWidgetState() {
+  function readSavedWidgetState(activeQuiz) {
+    const candidates = [
+      readHostWidgetState(),
+      readLocalProgressState(activeQuiz?.quizId)
+    ]
+      .map((candidate, order) => {
+        if (isProgressClearMarker(candidate, activeQuiz)) {
+          return {
+            cleared: true,
+            normalized: null,
+            order,
+            updatedAt: readSavedUpdatedAt(candidate)
+          };
+        }
+        const normalized = normalizeSavedWidgetState(candidate, activeQuiz);
+        if (!normalized || !hasMeaningfulQuizState(normalized)) {
+          return null;
+        }
+        return {
+          cleared: false,
+          normalized,
+          order,
+          updatedAt: readSavedUpdatedAt(candidate)
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => (right.updatedAt - left.updatedAt) || (left.order - right.order));
+
+    return candidates[0]?.cleared ? null : (candidates[0]?.normalized || null);
+  }
+
+  function readHostWidgetState() {
     const snapshot = getOpenAI()?.widgetState;
     if (!snapshot || typeof snapshot !== "object") {
       return null;
@@ -1408,6 +1667,22 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     }
 
     return snapshot;
+  }
+
+  function readSavedUpdatedAt(saved) {
+    const candidate = saved?.privateContent && typeof saved.privateContent === "object" ? saved.privateContent : saved;
+    return typeof candidate?.updatedAt === "number" && Number.isFinite(candidate.updatedAt) ? candidate.updatedAt : 0;
+  }
+
+  function isProgressClearMarker(saved, activeQuiz) {
+    const candidate = saved?.privateContent && typeof saved.privateContent === "object" ? saved.privateContent : saved;
+    return Boolean(
+      activeQuiz?.quizId &&
+      candidate &&
+      typeof candidate === "object" &&
+      candidate.quizId === activeQuiz.quizId &&
+      candidate.cleared === true
+    );
   }
 
   function normalizeSavedWidgetState(saved, activeQuiz) {
@@ -1463,6 +1738,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
     const answeredCount = Object.keys(answers).length;
     let index = clampIndex(candidate.index, activeQuiz.questions.length);
     const studyMode = normalizeStudyMode(candidate.studyMode);
+    const theme = normalizeThemeId(candidate.theme) || activeThemeId;
     let review = candidate.review === true;
     let reviewMode = normalizeReviewMode(candidate.reviewMode);
     const showResult = candidate.showResult === true && answeredCount > 0;
@@ -1515,7 +1791,8 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
       reviewMode,
       studyMode,
       showResult,
-      phase
+      phase,
+      theme
     };
   }
 
@@ -1626,7 +1903,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
 
     const question = quiz.questions[activeIndex];
     if (!question) {
-      setState(defaultState(quiz.quizId));
+      setState(defaultState(quiz.quizId), { clear: true, force: true });
       renderWaiting("This quiz view was reset because saved progress was incomplete.", true);
       return;
     }
@@ -2034,7 +2311,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
 
     if (quiz?.quizId) {
       state = defaultState(quiz.quizId);
-      persistWidgetState();
+      persistWidgetState({ clear: true, force: true });
       try {
         render();
         return;
@@ -2392,7 +2669,7 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
       return;
     }
 
-    setState(defaultState(quiz.quizId));
+    setState(defaultState(quiz.quizId), { clear: true, force: true });
     setStatus("Restarted this attempt. ChatGPT is needed to create a new order.");
   }
 
@@ -2544,6 +2821,8 @@ export const QUIZ_WIDGET_HTML = String.raw`<!doctype html>
   }
 
   function getSavedChoiceIds(answer) {
+    if (Array.isArray(answer)) return uniqueStrings(answer);
+    if (typeof answer === "string") return [answer];
     if (!answer || typeof answer !== "object") return [];
     if (Array.isArray(answer.choiceIds)) return uniqueStrings(answer.choiceIds);
     return typeof answer.choiceId === "string" ? [answer.choiceId] : [];
