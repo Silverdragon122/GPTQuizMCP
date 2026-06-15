@@ -115,6 +115,7 @@ class TestStorage {
 describe("quiz widget hydration", () => {
   it("embeds a pinned local KaTeX runtime without remote resources", () => {
     expect(QUIZ_WIDGET_HTML.startsWith("<!doctype html>")).toBe(true);
+    expect(QUIZ_WIDGET_HTML).toContain('<meta charset="utf-8">');
     expect(QUIZ_WIDGET_HTML).toContain('data-quiz-vendor="katex"');
     expect(QUIZ_WIDGET_HTML).toContain('data-version="0.17.0"');
     expect(QUIZ_WIDGET_HTML).toContain("renderToString");
@@ -136,6 +137,20 @@ describe("quiz widget hydration", () => {
     expect(style).toContain("transform: translateX(320%);");
     expect(style).not.toContain("background-position:");
     expect(QUIZ_WIDGET_HTML).toContain('setProperty("--progress-scale"');
+  });
+
+  it("has live sorting drag affordances", () => {
+    const style = extractWidgetStyle();
+
+    expect(style).toContain(".sorting-list.sorting-live .sort-item");
+    expect(style).toContain("will-change: transform;");
+    expect(style).toContain(".sort-item.dragging");
+    expect(style).toContain(".sort-item.drop-before");
+    expect(QUIZ_WIDGET_HTML).toContain('setAttribute("data-sort-question-id"');
+    expect(QUIZ_WIDGET_HTML).toContain("previewSortingFromDragEvent");
+    expect(QUIZ_WIDGET_HTML).toContain("beginSortingPointerDrag");
+    expect(QUIZ_WIDGET_HTML).toContain('document.addEventListener("pointermove"');
+    expect(QUIZ_WIDGET_HTML).toContain("animateSortReorder");
   });
 
   it("hydrates from mcp_tool_result metadata when toolOutput is empty", () => {
@@ -740,6 +755,65 @@ describe("quiz widget hydration", () => {
     expect(findElements(root, (element) => element.className === "answers long-answers")).toHaveLength(1);
     expect(findButtonContainingText(root, "Swahili Coast")?.className).toContain("compact-answer");
   });
+
+  it("supports matching questions with partial score persistence", () => {
+    const toolResult = makeMatchingToolResult();
+    const { openai, root } = mountWidget({
+      toolOutput: toolResult.structuredContent,
+      toolResponseMetadata: { _meta: toolResult._meta }
+    });
+
+    findButtonByText(root, "Paris")!.click();
+    findElements(root, (element) =>
+      element.classList.contains("match-target") && element.textContent.includes("France")
+    )[0]!.click();
+
+    findButtonByText(root, "Submit answer")!.click();
+
+    expect(root.textContent).toContain("Partially correct");
+    expect(root.textContent).toContain("500 of 1000 points");
+    expect(storageSnapshot(openai.widgetState)).toMatchObject({
+      score: 500,
+      answers: {
+        q_0: {
+          type: "matching",
+          score: 500,
+          matches: {
+            m_0: "a_0_0"
+          }
+        }
+      }
+    });
+  });
+
+  it("supports sorting questions with move controls and point totals", () => {
+    const toolResult = makeSortingToolResult();
+    const { openai, root } = mountWidget({
+      toolOutput: toolResult.structuredContent,
+      toolResponseMetadata: { _meta: toolResult._meta }
+    });
+
+    findElements(root, (element) =>
+      element.tagName === "button" && element.textContent === "↓" && !element.disabled
+    )[0]!.click();
+    findButtonByText(root, "Submit answer")!.click();
+
+    expect(root.textContent).toContain("Correct");
+    expect(storageSnapshot(openai.widgetState)).toMatchObject({
+      score: 1000,
+      answers: {
+        q_0: {
+          type: "sorting",
+          score: 1000,
+          order: ["a_0_0", "a_0_1", "a_0_2"]
+        }
+      }
+    });
+
+    findButtonByText(root, "Show score")!.click();
+    expect(root.textContent).toContain("1000 points");
+    expect(root.textContent).toContain("Points");
+  });
 });
 
 function mountWidget(
@@ -952,6 +1026,98 @@ function makeToolResult(
             ]
           }
         ]
+      }
+    }
+  };
+}
+
+function makeMatchingToolResult() {
+  return {
+    structuredContent: {
+      quizId: "quiz_matching",
+      title: "Matching quiz",
+      totalQuestions: 1,
+      targetGradePercent: 100,
+      passingScorePercent: 100,
+      questions: [
+        {
+          id: "q_0",
+          prompt: "Match each country to its capital.",
+          type: "matching",
+          targets: [
+            { id: "m_0", text: "France" },
+            { id: "m_1", text: "Italy" }
+          ],
+          choices: [
+            { id: "a_0_0", text: "Paris" },
+            { id: "a_0_1", text: "Rome" }
+          ]
+        }
+      ]
+    },
+    _meta: {
+      answerKey: {
+        q_0: {
+          type: "matching",
+          matches: {
+            m_0: "a_0_0",
+            m_1: "a_0_1"
+          }
+        }
+      },
+      explanations: { q_0: "Each country has one capital." },
+      choiceExplanations: {},
+      generatedAt: "2026-06-11T00:00:00.000Z",
+      shuffle: {
+        questions: false,
+        answers: true
+      },
+      retakeArguments: {
+        title: "Matching quiz",
+        questions: []
+      }
+    }
+  };
+}
+
+function makeSortingToolResult() {
+  return {
+    structuredContent: {
+      quizId: "quiz_sorting",
+      title: "Sorting quiz",
+      totalQuestions: 1,
+      targetGradePercent: 100,
+      passingScorePercent: 100,
+      questions: [
+        {
+          id: "q_0",
+          prompt: "Sort the workflow.",
+          type: "sorting",
+          choices: [
+            { id: "a_0_1", text: "Build" },
+            { id: "a_0_0", text: "Plan" },
+            { id: "a_0_2", text: "Ship" }
+          ]
+        }
+      ]
+    },
+    _meta: {
+      answerKey: {
+        q_0: {
+          type: "sorting",
+          order: ["a_0_0", "a_0_1", "a_0_2"]
+        }
+      },
+      explanations: { q_0: "Planning comes before building and shipping." },
+      choiceExplanations: {},
+      generatedAt: "2026-06-11T00:00:00.000Z",
+      shuffle: {
+        questions: false,
+        answers: true
+      },
+      retakeArguments: {
+        title: "Sorting quiz",
+        questions: []
       }
     }
   };

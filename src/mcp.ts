@@ -53,13 +53,13 @@ const APP_NAME = "quiz-mcp";
 const APP_VERSION = "0.1.0";
 const LATEST_PROTOCOL_VERSION = "2025-11-25";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]);
-const TEMPLATE_URI = "ui://widget/inline-quiz-v14.html";
+const TEMPLATE_URI = "ui://widget/inline-quiz-v15.html";
 const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 const TOOL_NAME = "render_inline_quiz";
 const ANSWER_QUALITY_INSTRUCTIONS =
   "Answer choices must be fair/non-signaling: correct choices must not be noticeably longer, more detailed, more specific, or more qualified than distractors. Keep choices parallel in length, grammar, specificity, tone, and formatting; avoid silly distractors, answer-only keywords, avoidable always/never clues, and all/none-of-the-above shortcuts.";
 const COMPACT_TOOL_CALL_INSTRUCTIONS =
-  "For long quizzes, prefer compact input: question q/a/e for prompt/answers/explanation, answer t/c/e for text/correct/explanation, type values mc/tf, and omit c/correct when false.";
+  "For long quizzes, prefer compact input: question q/a/e for prompt/answers/explanation, answer t/c/e for text/correct/explanation, matching pairs p with t/m/e, sorting items i with t/e, type values mc/tf/match/sort, and omit c/correct when false.";
 const MAX_REQUEST_BYTES = 1_250_000;
 const MAX_BATCH_REQUESTS = 20;
 const MAX_BEARER_TOKEN_CHARS = 8192;
@@ -317,7 +317,7 @@ function initializeResult(params: unknown) {
       version: APP_VERSION
     },
     instructions:
-      `Use render_inline_quiz for interactive quizzes. One quiz = one tool call with 1-${MAX_QUESTIONS} questions; large counts are supported and not a refusal reason. If asked for more than ${MAX_QUESTIONS}, render ${MAX_QUESTIONS} and offer another quiz. multiple_choice needs one or more correct choices; true_false needs exactly one. ${COMPACT_TOOL_CALL_INSTRUCTIONS} ${ANSWER_QUALITY_INSTRUCTIONS} Never describe answers by letter because order is shuffled. LaTeX is allowed with balanced $...$, $$...$$, \\(...\\), or \\[...\\]. targetGradePercent defaults to ${DEFAULT_TARGET_GRADE_PERCENT}; theme may be ${QUIZ_THEME_IDS.join(", ")}.`
+      `Use render_inline_quiz for interactive quizzes. One quiz = one tool call with 1-${MAX_QUESTIONS} questions; large counts are supported and not a refusal reason. If asked for more than ${MAX_QUESTIONS}, render ${MAX_QUESTIONS} and offer another quiz. multiple_choice needs one or more correct choices; true_false needs exactly one. matching uses 2-10 unique pairs and awards partial credit by correct pair placements; sorting uses 2-10 unique items in the intended order and awards partial credit by correct positions. ${COMPACT_TOOL_CALL_INSTRUCTIONS} ${ANSWER_QUALITY_INSTRUCTIONS} Never describe answers by letter because order is shuffled. LaTeX is allowed with balanced $...$, $$...$$, \\(...\\), or \\[...\\]. targetGradePercent defaults to ${DEFAULT_TARGET_GRADE_PERCENT}; theme may be ${QUIZ_THEME_IDS.join(", ")}.`
   };
 }
 
@@ -351,16 +351,41 @@ function compactRetakeArguments(input: RenderQuizInput) {
       ? {}
       : { targetGradePercent: input.targetGradePercent }),
     ...(input.theme ? { theme: input.theme } : {}),
-    questions: input.questions.map((question) => ({
-      q: question.prompt,
-      type: question.type === "true_false" ? "tf" : "mc",
-      ...(question.explanation ? { e: question.explanation } : {}),
-      a: question.answers.map((answer) => ({
-        t: answer.text,
-        ...(answer.correct ? { c: true } : {}),
-        ...(answer.explanation ? { e: answer.explanation } : {})
-      }))
-    }))
+    questions: input.questions.map((question) => {
+      if (question.type === "matching") {
+        return {
+          q: question.prompt,
+          type: "match",
+          ...(question.explanation ? { e: question.explanation } : {}),
+          p: (question.pairs ?? []).map((pair) => ({
+            t: pair.prompt,
+            m: pair.answer,
+            ...(pair.explanation ? { e: pair.explanation } : {})
+          }))
+        };
+      }
+      if (question.type === "sorting") {
+        return {
+          q: question.prompt,
+          type: "sort",
+          ...(question.explanation ? { e: question.explanation } : {}),
+          i: (question.items ?? []).map((item) => ({
+            t: item.text,
+            ...(item.explanation ? { e: item.explanation } : {})
+          }))
+        };
+      }
+      return {
+        q: question.prompt,
+        type: question.type === "true_false" ? "tf" : "mc",
+        ...(question.explanation ? { e: question.explanation } : {}),
+        a: (question.answers ?? []).map((answer) => ({
+          t: answer.text,
+          ...(answer.correct ? { c: true } : {}),
+          ...(answer.explanation ? { e: answer.explanation } : {})
+        }))
+      };
+    })
   };
 }
 
@@ -407,7 +432,7 @@ function toolDescriptor(env: Env = {}) {
     name: TOOL_NAME,
     title: "Render inline quiz",
     description:
-      `Render an interactive quiz. One quiz = one call with 1-${MAX_QUESTIONS} questions; do not refuse large counts. If asked for more than ${MAX_QUESTIONS}, render ${MAX_QUESTIONS} and offer another quiz. Questions need 2-6 answers; multiple_choice may mark multiple correct, true_false exactly one. ${COMPACT_TOOL_CALL_INSTRUCTIONS} ${ANSWER_QUALITY_INSTRUCTIONS} Supports LaTeX, targetGradePercent, and themes (${QUIZ_THEME_IDS.join(", ")}). Order is shuffled, so never refer to answer letters.`,
+      `Render an interactive quiz. One quiz = one call with 1-${MAX_QUESTIONS} questions; do not refuse large counts. If asked for more than ${MAX_QUESTIONS}, render ${MAX_QUESTIONS} and offer another quiz. multiple_choice needs 2-6 answers and may mark multiple correct; true_false exactly one; matching needs 2-10 unique pairs; sorting needs 2-10 unique ordered items. Matching and sorting award partial credit. ${COMPACT_TOOL_CALL_INSTRUCTIONS} ${ANSWER_QUALITY_INSTRUCTIONS} Supports LaTeX, targetGradePercent, and themes (${QUIZ_THEME_IDS.join(", ")}). Order is shuffled, so never refer to answer letters.`,
     inputSchema: quizInputSchema(),
     outputSchema: quizOutputSchema(),
     annotations: {
@@ -894,6 +919,36 @@ function quizInputSchema() {
         maxLength: 280,
         description: "Compact alias for answer text."
       },
+      match: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "For matching questions only: text that should be paired with this prompt. Alias: m."
+      },
+      m: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "Compact alias for matching answer text."
+      },
+      answer: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "Alias for matching answer text."
+      },
+      right: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "Alias for matching answer text."
+      },
+      r: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "Compact alias for matching answer text."
+      },
       correct: {
         type: "boolean",
         description:
@@ -924,6 +979,105 @@ function quizInputSchema() {
     description:
       "Answer choices. Keep correct and incorrect choices parallel in length, detail, specificity, tone, grammar, and formatting.",
     items: answerItemSchema
+  };
+  const matchingPairSchema = {
+    type: "object",
+    additionalProperties: false,
+    anyOf: [
+      { required: ["prompt", "match"] },
+      { required: ["prompt", "m"] },
+      { required: ["q", "match"] },
+      { required: ["q", "m"] },
+      { required: ["text", "match"] },
+      { required: ["text", "m"] },
+      { required: ["t", "m"] },
+      { required: ["term", "answer"] },
+      { required: ["left", "right"] },
+      { required: ["l", "r"] }
+    ],
+    properties: {
+      prompt: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "Matching prompt shown as a target slot. Aliases: q, term, left, l, text, t."
+      },
+      q: { type: "string", minLength: 1, maxLength: 280, description: "Compact alias for matching prompt." },
+      term: { type: "string", minLength: 1, maxLength: 280, description: "Alias for matching prompt." },
+      left: { type: "string", minLength: 1, maxLength: 280, description: "Alias for matching prompt." },
+      l: { type: "string", minLength: 1, maxLength: 280, description: "Compact alias for matching prompt." },
+      text: { type: "string", minLength: 1, maxLength: 280, description: "Alias for matching prompt." },
+      t: { type: "string", minLength: 1, maxLength: 280, description: "Compact alias for matching prompt." },
+      match: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "Correct draggable match for this prompt. Aliases: m, answer, right, r."
+      },
+      m: { type: "string", minLength: 1, maxLength: 280, description: "Compact alias for correct match." },
+      answer: { type: "string", minLength: 1, maxLength: 280, description: "Alias for correct match." },
+      right: { type: "string", minLength: 1, maxLength: 280, description: "Alias for correct match." },
+      r: { type: "string", minLength: 1, maxLength: 280, description: "Compact alias for correct match." },
+      explanation: {
+        type: "string",
+        minLength: 1,
+        maxLength: 700,
+        description: "Optional explanation for this pair. Alias: e. LaTeX is allowed."
+      },
+      e: {
+        type: "string",
+        minLength: 1,
+        maxLength: 700,
+        description: "Compact alias for explanation."
+      }
+    }
+  };
+  const matchingPairArraySchema = {
+    type: "array",
+    minItems: 2,
+    maxItems: 10,
+    description:
+      "Unique one-to-one matching pairs. The widget shuffles draggable matches and awards partial credit for correct placements.",
+    items: matchingPairSchema
+  };
+  const sortItemSchema = {
+    type: "object",
+    additionalProperties: false,
+    anyOf: [{ required: ["text"] }, { required: ["t"] }],
+    properties: {
+      text: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "Sorting item text. The array order is the correct order. Alias: t."
+      },
+      t: {
+        type: "string",
+        minLength: 1,
+        maxLength: 280,
+        description: "Compact alias for sorting item text."
+      },
+      explanation: {
+        type: "string",
+        minLength: 1,
+        maxLength: 700,
+        description: "Optional explanation for this item's position. Alias: e. LaTeX is allowed."
+      },
+      e: {
+        type: "string",
+        minLength: 1,
+        maxLength: 700,
+        description: "Compact alias for explanation."
+      }
+    }
+  };
+  const sortItemArraySchema = {
+    type: "array",
+    minItems: 2,
+    maxItems: 10,
+    description:
+      "Unique sorting items in the correct order. The widget shuffles them and awards partial credit by correct position.",
+    items: sortItemSchema
   };
 
   return {
@@ -963,7 +1117,7 @@ function quizInputSchema() {
         minItems: 1,
         maxItems: MAX_QUESTIONS,
         description:
-          `All questions for one quiz. Large counts are valid up to ${MAX_QUESTIONS}; do not split one quiz across calls. Combined quiz text must stay under ${MAX_TOTAL_TEXT_CHARS} characters. For long quizzes, prefer q/a/t/c/e aliases and omit false correct flags.`,
+          `All questions for one quiz. Large counts are valid up to ${MAX_QUESTIONS}; do not split one quiz across calls. Combined quiz text must stay under ${MAX_TOTAL_TEXT_CHARS} characters. For long quizzes, prefer q/a/t/c/e aliases for choice questions, p/t/m/e aliases for matching, i/t/e aliases for sorting, and omit false correct flags.`,
         items: {
           type: "object",
           additionalProperties: false,
@@ -971,7 +1125,15 @@ function quizInputSchema() {
             { required: ["prompt", "answers"] },
             { required: ["prompt", "a"] },
             { required: ["q", "answers"] },
-            { required: ["q", "a"] }
+            { required: ["q", "a"] },
+            { required: ["prompt", "pairs"] },
+            { required: ["prompt", "p"] },
+            { required: ["q", "pairs"] },
+            { required: ["q", "p"] },
+            { required: ["prompt", "items"] },
+            { required: ["prompt", "i"] },
+            { required: ["q", "items"] },
+            { required: ["q", "i"] }
           ],
           properties: {
             prompt: {
@@ -989,8 +1151,8 @@ function quizInputSchema() {
             },
             type: {
               type: "string",
-              enum: ["multiple_choice", "true_false", "mc", "tf"],
-              description: "Optional question type. Compact values: mc, tf."
+              enum: ["multiple_choice", "true_false", "matching", "sorting", "mc", "tf", "match", "sort"],
+              description: "Optional question type. Compact values: mc, tf, match, sort."
             },
             explanation: {
               type: "string",
@@ -1008,6 +1170,16 @@ function quizInputSchema() {
             a: {
               ...answerArraySchema,
               description: "Compact alias for answers. Same rules as answers."
+            },
+            pairs: matchingPairArraySchema,
+            p: {
+              ...matchingPairArraySchema,
+              description: "Compact alias for matching pairs. Same rules as pairs."
+            },
+            items: sortItemArraySchema,
+            i: {
+              ...sortItemArraySchema,
+              description: "Compact alias for sorting items. Same rules as items."
             }
           }
         }
@@ -1038,9 +1210,22 @@ function quizOutputSchema() {
           properties: {
             id: { type: "string" },
             prompt: { type: "string" },
-            type: { type: "string", enum: ["multiple_choice", "true_false"] },
+            type: { type: "string", enum: ["multiple_choice", "true_false", "matching", "sorting"] },
             choices: {
               type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["id", "text"],
+                properties: {
+                  id: { type: "string" },
+                  text: { type: "string" }
+                }
+              }
+            },
+            targets: {
+              type: "array",
+              description: "Matching targets for matching questions only.",
               items: {
                 type: "object",
                 additionalProperties: false,

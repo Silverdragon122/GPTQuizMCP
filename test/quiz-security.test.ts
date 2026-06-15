@@ -51,6 +51,33 @@ describe("quiz input security", () => {
     expect(getterCalled).toBe(false);
   });
 
+  it("rejects accessor matching pair fields without invoking hostile getters", () => {
+    let getterCalled = false;
+    const pair = Object.defineProperty({ m: "Paris" }, "t", {
+      enumerable: true,
+      get() {
+        getterCalled = true;
+        return "France";
+      }
+    });
+
+    expect(() =>
+      normalizeQuizInput({
+        questions: [
+          {
+            q: "Match capitals.",
+            type: "match",
+            p: [
+              pair,
+              { t: "Italy", m: "Rome" }
+            ]
+          }
+        ]
+      })
+    ).toThrow("questions[0].pairs[0].t must be a data property.");
+    expect(getterCalled).toBe(false);
+  });
+
   it("rejects inherited quiz properties", () => {
     const input = Object.create({ questions: [validQuestion] }) as Record<string, unknown>;
 

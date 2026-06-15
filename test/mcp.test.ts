@@ -11,12 +11,15 @@ describe("mcp endpoint", () => {
     expect(tool.name).toBe("render_inline_quiz");
     expect(tool.securitySchemes).toEqual([{ type: "noauth" }]);
     expect(tool.annotations.readOnlyHint).toBe(true);
-    expect(tool._meta.ui.resourceUri).toBe("ui://widget/inline-quiz-v14.html");
-    expect(tool._meta["openai/outputTemplate"]).toBe("ui://widget/inline-quiz-v14.html");
+    expect(tool._meta.ui.resourceUri).toBe("ui://widget/inline-quiz-v15.html");
+    expect(tool._meta["openai/outputTemplate"]).toBe("ui://widget/inline-quiz-v15.html");
     expect(tool.description).toContain("one call");
     expect(tool.description).toContain("do not refuse");
     expect(tool.description).toContain("may mark multiple correct");
     expect(tool.description).toContain("true_false exactly one");
+    expect(tool.description).toContain("matching needs 2-10 unique pairs");
+    expect(tool.description).toContain("sorting needs 2-10 unique ordered items");
+    expect(tool.description).toContain("partial credit");
     expect(tool.description).toContain("compact input");
     expect(tool.description).toContain("omit c/correct when false");
     expect(tool.description).toContain("fair/non-signaling");
@@ -33,6 +36,8 @@ describe("mcp endpoint", () => {
     ]);
     expect(tool.inputSchema.properties.questions.items.properties.answers.items.required).toBeUndefined();
     expect(tool.inputSchema.properties.questions.items.properties.answers.items.properties.c.description).toContain("omit when false");
+    expect(tool.inputSchema.properties.questions.items.properties.p.description).toContain("matching pairs");
+    expect(tool.inputSchema.properties.questions.items.properties.i.description).toContain("sorting items");
     expect(tool.inputSchema.properties.questions.items.properties.answers.items.properties.text.description).toContain("not guessable from style");
     expect(tool.inputSchema.properties.targetGradePercent).toBeDefined();
     expect(tool.inputSchema.properties.theme.enum).toEqual([...QUIZ_THEME_IDS]);
@@ -60,11 +65,11 @@ describe("mcp endpoint", () => {
   });
 
   it("reads the widget resource with mcp-app mime type and CSP metadata", async () => {
-    const response = await rpc("resources/read", { uri: "ui://widget/inline-quiz-v14.html" });
+    const response = await rpc("resources/read", { uri: "ui://widget/inline-quiz-v15.html" });
     const body = await response.json() as any;
     const content = body.result.contents[0];
 
-    expect(content.uri).toBe("ui://widget/inline-quiz-v14.html");
+    expect(content.uri).toBe("ui://widget/inline-quiz-v15.html");
     expect(content.mimeType).toBe("text/html;profile=mcp-app");
     expect(content.text).toContain("quiz-root");
     expect(content._meta.ui.csp.connectDomains).toEqual([]);
@@ -141,6 +146,46 @@ describe("mcp endpoint", () => {
     expect(body.result.structuredContent.questions[0].prompt).toBe("Which number is prime?");
     expect(body.result.structuredContent.questions[0].choices.map((choice: any) => choice.text).sort()).toEqual(["2", "4"]);
     expect(body.result._meta.answerKey).toBeDefined();
+  });
+
+  it("accepts compact matching and sorting questions", async () => {
+    const response = await rpc("tools/call", {
+      name: "render_inline_quiz",
+      arguments: {
+        title: "Drag formats",
+        shuffleQuestions: false,
+        questions: [
+          {
+            q: "Match each country to its capital.",
+            type: "match",
+            p: [
+              { t: "France", m: "Paris" },
+              { t: "Italy", m: "Rome" }
+            ]
+          },
+          {
+            q: "Sort the workflow.",
+            type: "sort",
+            i: [
+              { t: "Plan" },
+              { t: "Build" },
+              { t: "Ship" }
+            ]
+          }
+        ]
+      }
+    });
+    const body = await response.json() as any;
+    const [matching, sorting] = body.result.structuredContent.questions;
+
+    expect(matching.type).toBe("matching");
+    expect(matching.targets).toHaveLength(2);
+    expect(sorting.type).toBe("sorting");
+    expect(body.result._meta.answerKey[matching.id].type).toBe("matching");
+    expect(body.result._meta.answerKey[sorting.id].type).toBe("sorting");
+    expect(body.result._meta.retakeArguments.questions[0].type).toBe("match");
+    expect(body.result._meta.retakeArguments.questions[1].type).toBe("sort");
+    expect(JSON.stringify(body.result.structuredContent)).not.toContain("answerKey");
   });
 
   it("allows separate quiz calls without merging or dropping the second result", async () => {

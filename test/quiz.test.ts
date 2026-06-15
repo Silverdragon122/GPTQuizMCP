@@ -178,6 +178,97 @@ describe("quiz builder", () => {
     expect(quiz.retakeInput.questions[0]?.answers.filter((answer) => answer.correct)).toHaveLength(2);
   });
 
+  it("builds matching questions with hidden pair mappings and compact retake data", () => {
+    const quiz = buildQuiz(
+      {
+        questions: [
+          {
+            prompt: "Match each country to its capital.",
+            type: "matching",
+            pairs: [
+              { prompt: "France", match: "Paris", explanation: "Paris is the capital of France." },
+              { prompt: "Italy", match: "Rome" }
+            ]
+          }
+        ]
+      },
+      { rng: cyclingRng(), now: "2026-06-11T00:00:00.000Z" }
+    );
+    const question = quiz.structuredContent.questions[0]!;
+    const answerKey = quiz.meta.answerKey[question.id] as any;
+
+    expect(question.type).toBe("matching");
+    expect(question.targets).toHaveLength(2);
+    expect(question.choices).toHaveLength(2);
+    expect(answerKey.type).toBe("matching");
+    expect(Object.keys(answerKey.matches)).toHaveLength(2);
+    expect(JSON.stringify(quiz.structuredContent)).not.toContain("matches");
+    expect(quiz.retakeInput.questions[0]?.pairs?.[0]).toMatchObject({
+      prompt: "France",
+      answer: "Paris"
+    });
+  });
+
+  it("builds sorting questions with hidden correct order and compact retake data", () => {
+    const quiz = buildQuiz(
+      {
+        questions: [
+          {
+            prompt: "Sort these steps.",
+            type: "sorting",
+            items: [
+              { text: "Plan" },
+              { text: "Build" },
+              { text: "Ship" }
+            ]
+          }
+        ]
+      },
+      { rng: cyclingRng(), now: "2026-06-11T00:00:00.000Z" }
+    );
+    const question = quiz.structuredContent.questions[0]!;
+    const answerKey = quiz.meta.answerKey[question.id] as any;
+
+    expect(question.type).toBe("sorting");
+    expect(question.choices).toHaveLength(3);
+    expect(answerKey.type).toBe("sorting");
+    expect(answerKey.order).toHaveLength(3);
+    expect(JSON.stringify(quiz.structuredContent)).not.toContain("order");
+    expect(quiz.retakeInput.questions[0]?.items?.map((item) => item.text)).toEqual(["Plan", "Build", "Ship"]);
+  });
+
+  it("rejects ambiguous matching and sorting labels", () => {
+    expect(() =>
+      normalizeQuizInput({
+        questions: [
+          {
+            prompt: "Match.",
+            type: "matching",
+            pairs: [
+              { t: "France", m: "Paris" },
+              { t: "France", m: "Rome" }
+            ]
+          }
+        ]
+      })
+    ).toThrow("matching prompts must be unique");
+
+    expect(() =>
+      normalizeQuizInput({
+        questions: [
+          {
+            prompt: "Sort.",
+            type: "sorting",
+            items: [
+              { text: "Plan" },
+              { text: "Plan" }
+            ]
+          }
+        ]
+      })
+    ).toThrow("sorting items must be unique");
+  });
+
   it("rejects questions without a correct answer", () => {
     expect(() =>
       buildQuiz({

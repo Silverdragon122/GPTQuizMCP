@@ -1,5 +1,5 @@
 const endpoint = new URL(process.env.MCP_URL || "http://127.0.0.1:8787/mcp");
-const templateUri = "ui://widget/inline-quiz-v14.html";
+const templateUri = "ui://widget/inline-quiz-v15.html";
 const expectedWidgetDomain = process.env.EXPECTED_WIDGET_DOMAIN || "";
 let nextId = 1;
 
@@ -21,6 +21,23 @@ const sampleQuiz = {
       answers: [
         { text: "True", correct: true },
         { text: "False", correct: false }
+      ]
+    },
+    {
+      prompt: "Match each runtime to its role.",
+      type: "matching",
+      pairs: [
+        { prompt: "Wrangler", match: "Deployment CLI" },
+        { prompt: "Worker", match: "Edge function" }
+      ]
+    },
+    {
+      prompt: "Sort a typical release flow.",
+      type: "sorting",
+      items: [
+        { text: "Build" },
+        { text: "Test" },
+        { text: "Deploy" }
       ]
     }
   ]
@@ -55,7 +72,7 @@ async function checkToolDescriptor() {
   assert(tool._meta?.["openai/widgetAccessible"] === true, "Widget must remain accessible to host bridge events.");
   assert(tool._meta?.["openai/visibility"] === "public", "No-auth deployment should remain public in Apps metadata.");
 
-  console.log("tools/list: ok (noauth, v14 template)");
+  console.log("tools/list: ok (noauth, v15 template)");
 }
 
 async function checkWidgetResource() {

@@ -14,10 +14,11 @@ It runs as a Cloudflare Worker. ChatGPT sends quiz questions to the Worker, the 
 
 ## What You Get
 
-- Interactive multiple-choice and true/false quizzes
+- Interactive multiple-choice, true/false, matching, and sorting quizzes
 - Single-answer and multiple-answer questions
+- Drag-and-drop matching and sorting with tap/click fallbacks
 - Immediate feedback after each answer
-- Final score screen
+- Final score screen with 1000-point question scoring and partial credit
 - Review, missed-only review, flagged questions, and learn mode
 - Built-in themes that persist in the browser when possible
 - No database required
@@ -166,6 +167,23 @@ Example input:
         { "text": "2", "correct": true, "explanation": "2 is prime." },
         { "text": "4", "correct": false, "explanation": "4 is divisible by 2." }
       ]
+    },
+    {
+      "prompt": "Match each country to its capital.",
+      "type": "matching",
+      "pairs": [
+        { "prompt": "France", "match": "Paris" },
+        { "prompt": "Italy", "match": "Rome" }
+      ]
+    },
+    {
+      "prompt": "Sort the workflow from first to last.",
+      "type": "sorting",
+      "items": [
+        { "text": "Plan" },
+        { "text": "Build" },
+        { "text": "Ship" }
+      ]
     }
   ]
 }
@@ -184,6 +202,23 @@ Compact input for long quizzes is also accepted:
         { "t": "2", "c": true },
         { "t": "4" }
       ]
+    },
+    {
+      "q": "Match each country to its capital.",
+      "type": "match",
+      "p": [
+        { "t": "France", "m": "Paris" },
+        { "t": "Italy", "m": "Rome" }
+      ]
+    },
+    {
+      "q": "Sort the workflow from first to last.",
+      "type": "sort",
+      "i": [
+        { "t": "Plan" },
+        { "t": "Build" },
+        { "t": "Ship" }
+      ]
     }
   ]
 }
@@ -196,7 +231,10 @@ Rules:
 - `multiple_choice` questions need at least one correct answer.
 - `multiple_choice` questions may have more than one correct answer.
 - `true_false` questions need exactly two answers and exactly one correct answer.
-- For large quizzes, prefer compact aliases: `q`/`a` for question prompt/answers, `t`/`c`/`e` for answer text/correct/explanation, and `mc`/`tf` for type values.
+- `matching` questions need 2 to 10 unique pairs. Use `pairs` or compact `p`; each pair uses `prompt`/`match` or compact `t`/`m`.
+- `sorting` questions need 2 to 10 unique items in the correct order. Use `items` or compact `i`; each item uses `text` or compact `t`.
+- Matching and sorting support partial credit. The widget score adds 1000 points for a fully correct question, a proportional amount for partial answers, and 0 for fully wrong answers.
+- For large quizzes, prefer compact aliases: `q`/`a` for question prompt/answers, `t`/`c`/`e` for answer text/correct/explanation, `p` with `t`/`m` for matching, `i` with `t` for sorting, and `mc`/`tf`/`match`/`sort` for type values.
 - `correct` and `c` can be omitted for false answers.
 - `targetGradePercent` is optional and defaults to 70.
 - `theme` is optional. Available themes are `aurora`, `paper`, `sakura`, `ember`, `circuit`, and `harbor`.
